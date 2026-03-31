@@ -1,0 +1,72 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "video-dubbing-vi"
+version = "0.1.0"
+description = "Automatic Vietnamese video dubbing pipeline using VLM + Voice Cloning"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+authors = [
+    {name = "Tan Quan"},
+]
+
+dependencies = [
+    # === Core ML ===
+    "torch>=2.1.0",
+    "transformers>=4.36.0",
+    "accelerate>=0.25.0",
+
+    # === VLM ===
+    "google-generativeai>=0.3.0",
+    "scenedetect[opencv]>=0.6.2",
+    "pysrt>=1.1.2",
+    "Pillow>=10.0.0",
+
+    # === TTS ===
+    "soundfile>=0.12.0",
+    "librosa>=0.10.0",
+
+    # === Audio Sync ===
+    "pydub>=0.25.1",
+    "pyrubberband>=0.3.0",
+
+    # === Web UI ===
+    "fastapi>=0.104.0",
+    "uvicorn[standard]>=0.24.0",
+    "gradio>=4.0.0",
+    "python-multipart>=0.0.6",
+
+    # === Evaluation ===
+    "sacrebleu>=2.3.0",
+    "resemblyzer>=0.1.3",
+
+    # === Utils ===
+    "python-dotenv>=1.0.0",
+    "pyyaml>=6.0.0",
+    "aiohttp>=3.9.0",
+    "aiofiles>=23.0.0",
+    "tqdm>=4.66.0",
+    "loguru>=0.7.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.21.0",
+    "ruff>=0.1.0",
+    "black>=23.0.0",
+]
+
+[tool.setuptools.packages.find]
+include = ["src*", "app*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

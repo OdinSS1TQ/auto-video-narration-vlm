@@ -1,0 +1,64 @@
+# === Python ===
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+
+# === Virtual Environment ===
+venv/
+.venv/
+.venv/Lib/
+env/
+.env/
+
+# === IDE ===
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# === Environment ===
+.env
+
+# === Model Weights (large files) ===
+models/qwen2-vl-7b-q4/
+models/glm-ocr/
+models/vitts/
+
+# === Data ===
+data/raw/
+data/reference_audio/
+data/processed/
+data/outputs/
+data/eval_set/
+
+# === Jupyter ===
+.ipynb_checkpoints/
+
+# === OS ===
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# === Logs ===
+*.log
+logs/
+
+# === Temp ===
+tmp/
+*.tmp
+
+# === Output ===
+output/
+debug_output/
+
+# === Test ===
+tests/
+
+# === Model ===
+models/

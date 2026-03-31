@@ -1,0 +1,18 @@
+# Qwen2-VL local model configuration
+
+model:
+  path: ./models/qwen2-vl-7b-q4
+  quantization: Q4_K_M
+  n_gpu_layers: 35  # Adjust based on VRAM (8GB: ~35, 12GB: all)
+
+inference:
+  context_length: 8192
+  temperature: 0.2
+  max_tokens: 4096
+  repeat_penalty: 1.1
+
+# Memory optimization for 8GB VRAM
+memory:
+  max_batch_size: 1
+  offload_kv_cache: false
+  flash_attention: true

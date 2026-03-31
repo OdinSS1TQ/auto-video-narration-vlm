@@ -1,0 +1,346 @@
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: var(--font-mono); }
+.tree-wrap { padding: 4px 0 8px; }
+.tree-title { font-size: 13px; font-weight: 500; color: var(--color-text-secondary); margin-bottom: 12px; font-family: var(--font-sans); }
+.node { display: flex; align-items: flex-start; gap: 0; cursor: pointer; user-select: none; }
+.node:hover > .label { background: var(--color-background-secondary); border-radius: 4px; }
+.indent { display: flex; align-items: stretch; flex-shrink: 0; }
+.pipe { width: 20px; display: flex; justify-content: center; }
+.pipe-line { width: 1px; background: var(--color-border-secondary); margin: 0 auto; }
+.toggle { width: 16px; height: 22px; display: flex; align-items: center; justify-content: center; font-size: 10px; color: var(--color-text-tertiary); flex-shrink: 0; transition: transform 0.15s; }
+.toggle.open { transform: rotate(90deg); }
+.toggle.leaf { opacity: 0; pointer-events: none; }
+.label { display: flex; align-items: center; gap: 6px; padding: 1px 6px 1px 2px; border-radius: 4px; flex: 1; }
+.icon { font-size: 14px; flex-shrink: 0; width: 18px; text-align: center; }
+.name { font-size: 12.5px; color: var(--color-text-primary); white-space: nowrap; }
+.name.dir { font-weight: 500; }
+.comment { font-size: 11px; color: var(--color-text-tertiary); margin-left: 4px; white-space: nowrap; }
+.badge { font-size: 10px; padding: 1px 6px; border-radius: 3px; margin-left: 6px; font-family: var(--font-sans); font-weight: 500; white-space: nowrap; }
+.badge-purple { background: #EEEDFE; color: #3C3489; }
+.badge-teal { background: #E1F5EE; color: #0F6E56; }
+.badge-amber { background: #FAEEDA; color: #854F0B; }
+.badge-blue { background: #E6F1FB; color: #185FA5; }
+.badge-coral { background: #FAECE7; color: #993C1D; }
+.badge-gray { background: var(--color-background-secondary); color: var(--color-text-secondary); border: 0.5px solid var(--color-border-secondary); }
+@media (prefers-color-scheme: dark) {
+  .badge-purple { background: #26215C; color: #AFA9EC; }
+  .badge-teal { background: #04342C; color: #5DCAA5; }
+  .badge-amber { background: #412402; color: #EF9F27; }
+  .badge-blue { background: #042C53; color: #85B7EB; }
+  .badge-coral { background: #4A1B0C; color: #F0997B; }
+}
+.children { display: block; }
+.children.hidden { display: none; }
+</style>
+<div class="tree-wrap">
+<div class="tree-title">📁 video-dubbing-vi/ — Cấu trúc thư mục dự án</div>
+<div id="tree"></div>
+</div>
+<script>
+const DATA = {
+  name: "video-dubbing-vi/", type: "dir", badge: null, comment: "root project",
+  children: [
+    {
+      name: "src/", type: "dir", badge: ["purple","core"], comment: "toàn bộ source code",
+      children: [
+        {
+          name: "vlm/", type: "dir", badge: ["purple","Module 1"], comment: "",
+          children: [
+            { name: "__init__.py", type: "file", comment: "" },
+            { name: "scene_detector.py", type: "file", comment: "PySceneDetect wrapper" },
+            { name: "frame_extractor.py", type: "file", comment: "key frame + base64 encode" },
+            { name: "glm_ocr.py", type: "file", comment: "GLM-OCR text extraction" },
+            { name: "prompt_chain.py", type: "file", comment: "3-step prompt builder" },
+            { name: "vlm_client.py", type: "file", comment: "Gemini / Qwen2-VL client" },
+            { name: "validator.py", type: "file", comment: "heuristic + retry logic" },
+            { name: "srt_builder.py", type: "file", comment: "merge chunks → .srt" },
+            { name: "context_window.py", type: "file", comment: "sliding context manager" },
+          ]
+        },
+        {
+          name: "tts/", type: "dir", badge: ["teal","Module 2"], comment: "",
+          children: [
+            { name: "__init__.py", type: "file", comment: "" },
+            { name: "tts_client.py", type: "file", comment: "F5-TTS / viXTTS interface" },
+            { name: "speaker_encoder.py", type: "file", comment: "extract voice embedding" },
+            { name: "batch_inference.py", type: "file", comment: "batch generate audio" },
+          ]
+        },
+        {
+          name: "sync/", type: "dir", badge: ["amber","Module 3"], comment: "",
+          children: [
+            { name: "__init__.py", type: "file", comment: "" },
+            { name: "time_stretcher.py", type: "file", comment: "rubberband wrapper" },
+            { name: "audio_aligner.py", type: "file", comment: "delta calc + strategy" },
+            { name: "ffmpeg_renderer.py", type: "file", comment: "final video merge" },
+          ]
+        },
+        {
+          name: "pipeline/", type: "dir", badge: ["blue","Orchestrator"], comment: "",
+          children: [
+            { name: "__init__.py", type: "file", comment: "" },
+            { name: "runner.py", type: "file", comment: "end-to-end pipeline entry" },
+            { name: "config.py", type: "file", comment: "load settings từ .env" },
+            { name: "logger.py", type: "file", comment: "structured logging" },
+            { name: "exceptions.py", type: "file", comment: "custom error types" },
+          ]
+        },
+        {
+          name: "evaluation/", type: "dir", badge: ["coral","Eval"], comment: "",
+          children: [
+            { name: "__init__.py", type: "file", comment: "" },
+            { name: "bleu_scorer.py", type: "file", comment: "sacrebleu wrapper" },
+            { name: "mos_estimator.py", type: "file", comment: "UTMOS / MOSNet" },
+            { name: "speaker_similarity.py", type: "file", comment: "resemblyzer cosine sim" },
+            { name: "sync_accuracy.py", type: "file", comment: "onset delay measurement" },
+            { name: "report_generator.py", type: "file", comment: "tổng hợp metrics → CSV" },
+          ]
+        },
+        {
+          name: "utils/", type: "dir", badge: null, comment: "",
+          children: [
+            { name: "__init__.py", type: "file", comment: "" },
+            { name: "video_utils.py", type: "file", comment: "ffprobe, duration, info" },
+            { name: "audio_utils.py", type: "file", comment: "load, resample, normalize" },
+            { name: "file_utils.py", type: "file", comment: "path helpers, temp cleanup" },
+            { name: "async_utils.py", type: "file", comment: "semaphore, gather helpers" },
+          ]
+        },
+      ]
+    },
+    {
+      name: "app/", type: "dir", badge: ["blue","Module 4"], comment: "web UI layer",
+      children: [
+        { name: "__init__.py", type: "file", comment: "" },
+        { name: "main.py", type: "file", comment: "FastAPI app entry point" },
+        { name: "gradio_ui.py", type: "file", comment: "Gradio interface definition" },
+        {
+          name: "routers/", type: "dir", comment: "",
+          children: [
+            { name: "upload.py", type: "file", comment: "POST /upload/video, /audio" },
+            { name: "process.py", type: "file", comment: "POST /process → job id" },
+            { name: "status.py", type: "file", comment: "GET /status/{job_id}" },
+            { name: "download.py", type: "file", comment: "GET /result/{job_id}" },
+          ]
+        },
+        {
+          name: "schemas/", type: "dir", comment: "",
+          children: [
+            { name: "request.py", type: "file", comment: "Pydantic input models" },
+            { name: "response.py", type: "file", comment: "Pydantic output models" },
+          ]
+        },
+      ]
+    },
+    {
+      name: "models/", type: "dir", badge: ["gray","gitignored"], comment: "model weights local",
+      children: [
+        { name: "qwen2-vl-7b-q4/", type: "dir", comment: "GGUF quantized weights" },
+        { name: "glm-ocr/", type: "dir", comment: "GLM-OCR 0.9B weights" },
+        { name: "vitts/", type: "dir", comment: "viXTTS / F5-TTS weights" },
+        { name: ".gitkeep", type: "file", comment: "" },
+      ]
+    },
+    {
+      name: "data/", type: "dir", badge: ["gray","gitignored"], comment: "",
+      children: [
+        { name: "raw/", type: "dir", comment: "video gốc input" },
+        { name: "reference_audio/", type: "dir", comment: "audio mẫu giọng" },
+        { name: "processed/", type: "dir", comment: "frames, chunks tạm" },
+        { name: "outputs/", type: "dir", comment: "video lồng tiếng output" },
+        { name: "eval_set/", type: "dir", comment: "10 video benchmark" },
+      ]
+    },
+    {
+      name: "tests/", type: "dir", comment: "unit + integration tests",
+      children: [
+        { name: "__init__.py", type: "file", comment: "" },
+        { name: "test_scene_detector.py", type: "file", comment: "" },
+        { name: "test_prompt_chain.py", type: "file", comment: "" },
+        { name: "test_vlm_client.py", type: "file", comment: "" },
+        { name: "test_srt_builder.py", type: "file", comment: "" },
+        { name: "test_audio_aligner.py", type: "file", comment: "" },
+        { name: "test_pipeline_e2e.py", type: "file", comment: "full pipeline smoke test" },
+      ]
+    },
+    {
+      name: "notebooks/", type: "dir", comment: "Colab / Jupyter experiments",
+      children: [
+        { name: "01_vlm_prompting_exp.ipynb", type: "file", comment: "thử nghiệm prompt" },
+        { name: "02_tts_quality_eval.ipynb", type: "file", comment: "MOS, speaker sim" },
+        { name: "03_sync_algorithm_dev.ipynb", type: "file", comment: "time-stretch tuning" },
+        { name: "04_model_comparison.ipynb", type: "file", comment: "Gemini vs Qwen2-VL" },
+        { name: "05_full_eval_report.ipynb", type: "file", comment: "tổng hợp chương 4" },
+      ]
+    },
+    {
+      name: "scripts/", type: "dir", comment: "CLI helpers",
+      children: [
+        { name: "run_pipeline.py", type: "file", comment: "CLI: process single video" },
+        { name: "batch_eval.py", type: "file", comment: "CLI: chạy eval set" },
+        { name: "download_models.py", type: "file", comment: "auto-download weights" },
+        { name: "setup_env.sh", type: "file", comment: "CUDA + deps bootstrap" },
+      ]
+    },
+    {
+      name: "configs/", type: "dir", comment: "",
+      children: [
+        { name: "default.yaml", type: "file", comment: "chunk size, thresholds, retry" },
+        { name: "gemini.yaml", type: "file", comment: "model, temperature, RPM" },
+        { name: "qwen_local.yaml", type: "file", comment: "n-gpu-layers, context len" },
+        { name: "tts.yaml", type: "file", comment: "speed, length_scale params" },
+      ]
+    },
+    {
+      name: "docs/", type: "dir", comment: "",
+      children: [
+        { name: "architecture.md", type: "file", comment: "system design overview" },
+        { name: "api_reference.md", type: "file", comment: "FastAPI endpoints" },
+        { name: "prompt_catalog.md", type: "file", comment: "toàn bộ prompts đã dùng" },
+        { name: "eval_results/", type: "dir", comment: "CSV, charts từ evaluation" },
+      ]
+    },
+    { name: ".env.example", type: "file", comment: "GEMINI_API_KEY, config mẫu" },
+    { name: ".gitignore", type: "file", comment: "models/, data/, .env, __pycache__" },
+    { name: "pyproject.toml", type: "file", comment: "deps: torch, transformers, …" },
+    { name: "requirements.txt", type: "file", comment: "pinned versions" },
+    { name: "Dockerfile", type: "file", comment: "container cho deployment" },
+    { name: "README.md", type: "file", comment: "hướng dẫn setup + demo" },
+  ]
+};
+
+const ICONS = {
+  dir: "📁",
+  py: "🐍", ipynb: "📓", yaml: "⚙️", md: "📄",
+  sh: "🔧", txt: "📋", env: "🔑", toml: "⚙️",
+  gitignore: "🚫", gitkeep: "📌", dockerfile: "🐳",
+  default: "📄"
+};
+
+function getIcon(node) {
+  if (node.type === "dir") return ICONS.dir;
+  const ext = node.name.split(".").pop().toLowerCase();
+  if (node.name === "Dockerfile") return ICONS.dockerfile;
+  if (node.name === ".gitignore") return ICONS.gitignore;
+  if (node.name === ".gitkeep") return ICONS.gitkeep;
+  if (node.name.startsWith(".env")) return ICONS.env;
+  return ICONS[ext] || ICONS.default;
+}
+
+function renderTree(nodes, depth, container) {
+  nodes.forEach(node => {
+    const wrap = document.createElement("div");
+
+    const row = document.createElement("div");
+    row.className = "node";
+
+    // indentation pipes
+    for (let i = 0; i < depth; i++) {
+      const ind = document.createElement("div");
+      ind.className = "indent";
+      const pipe = document.createElement("div");
+      pipe.className = "pipe";
+      const line = document.createElement("div");
+      line.className = "pipe-line";
+      pipe.appendChild(line);
+      ind.appendChild(pipe);
+      row.appendChild(ind);
+    }
+
+    // toggle
+    const tog = document.createElement("div");
+    tog.className = "toggle " + (node.children ? "open" : "leaf");
+    tog.textContent = "▶";
+    row.appendChild(tog);
+
+    // label
+    const lbl = document.createElement("div");
+    lbl.className = "label";
+
+    const ico = document.createElement("span");
+    ico.className = "icon";
+    ico.textContent = getIcon(node);
+    lbl.appendChild(ico);
+
+    const nm = document.createElement("span");
+    nm.className = "name" + (node.type === "dir" ? " dir" : "");
+    nm.textContent = node.name;
+    lbl.appendChild(nm);
+
+    if (node.badge) {
+      const b = document.createElement("span");
+      b.className = "badge badge-" + node.badge[0];
+      b.textContent = node.badge[1];
+      lbl.appendChild(b);
+    }
+
+    if (node.comment) {
+      const cmt = document.createElement("span");
+      cmt.className = "comment";
+      cmt.textContent = "— " + node.comment;
+      lbl.appendChild(cmt);
+    }
+
+    row.appendChild(lbl);
+    wrap.appendChild(row);
+
+    if (node.children) {
+      const childContainer = document.createElement("div");
+      childContainer.className = "children";
+      renderTree(node.children, depth + 1, childContainer);
+      wrap.appendChild(childContainer);
+
+      row.style.cursor = "pointer";
+      tog.addEventListener("click", e => {
+        e.stopPropagation();
+        const open = !childContainer.classList.contains("hidden");
+        childContainer.classList.toggle("hidden", open);
+        tog.classList.toggle("open", !open);
+      });
+      lbl.addEventListener("click", () => tog.click());
+    }
+
+    container.appendChild(wrap);
+  });
+}
+
+const root = document.getElementById("tree");
+// render root node itself
+const rootWrap = document.createElement("div");
+const rootRow = document.createElement("div");
+rootRow.className = "node";
+const rootTog = document.createElement("div");
+rootTog.className = "toggle open";
+rootTog.textContent = "▶";
+rootRow.appendChild(rootTog);
+const rootLbl = document.createElement("div");
+rootLbl.className = "label";
+const rootIco = document.createElement("span");
+rootIco.className = "icon";
+rootIco.textContent = "🗂️";
+rootLbl.appendChild(rootIco);
+const rootNm = document.createElement("span");
+rootNm.className = "name dir";
+rootNm.textContent = DATA.name;
+rootLbl.appendChild(rootNm);
+const rootCmt = document.createElement("span");
+rootCmt.className = "comment";
+rootCmt.textContent = "— " + DATA.comment;
+rootLbl.appendChild(rootCmt);
+rootRow.appendChild(rootLbl);
+rootWrap.appendChild(rootRow);
+
+const rootChildren = document.createElement("div");
+rootChildren.className = "children";
+renderTree(DATA.children, 1, rootChildren);
+rootWrap.appendChild(rootChildren);
+root.appendChild(rootWrap);
+
+rootTog.addEventListener("click", () => {
+  const open = !rootChildren.classList.contains("hidden");
+  rootChildren.classList.toggle("hidden", open);
+  rootTog.classList.toggle("open", !open);
+});
+rootLbl.addEventListener("click", () => rootTog.click());
+</script>
