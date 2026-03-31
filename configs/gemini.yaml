@@ -1,0 +1,20 @@
+# Gemini API configuration
+
+model:
+  name: gemini-1.5-flash
+  # Alternative: gemini-1.5-pro (more accurate, more expensive)
+
+generation:
+  temperature: 0.2
+  max_output_tokens: 4096
+  top_p: 0.95
+  response_mime_type: application/json
+
+# Rate limiting
+rate_limit:
+  requests_per_minute: 60
+  tokens_per_minute: 1000000
+
+# Safety settings (allow all for processing)
+safety:
+  block_none: true

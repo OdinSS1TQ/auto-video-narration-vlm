@@ -1,0 +1,37 @@
+# Default pipeline configuration
+
+# Scene detection
+scene_detection:
+  threshold: 27.0
+  min_scene_len: 15
+
+# Video chunking
+chunking:
+  duration_sec: 45
+  overlap_sec: 2
+  max_concurrent: 4
+
+# VLM settings
+vlm:
+  retry_max: 3
+  retry_delay: 1.0
+  context_window_size: 3
+
+# SRT validation
+srt:
+  min_duration: 0.5
+  max_duration: 10.0
+  min_gap: 0.05
+
+# Audio sync
+sync:
+  tolerance_sec: 0.2
+  max_stretch_ratio: 1.5
+  pad_strategy: silence  # silence | repeat
+
+# Output
+output:
+  format: mp4
+  keep_original_audio: false
+  original_volume: 0.1
+  burn_subtitles: false

@@ -1,0 +1,26 @@
+# TTS configuration
+
+engine: f5-tts  # f5-tts | vixtts
+
+f5_tts:
+  model_path: ./models/vitts/f5-tts-vi
+  sample_rate: 22050
+  speed: 1.0
+  # length_scale: 1.0  # Adjust for speaking speed
+
+vixtts:
+  model_path: ./models/vitts/vixtts-v2
+  sample_rate: 22050
+  language: vi
+
+# Speaker encoder
+speaker_encoder:
+  backend: resemblyzer  # resemblyzer | speechbrain
+  cache_dir: ./.speaker_cache
+
+# Audio post-processing
+post_processing:
+  normalize: true
+  target_db: -20.0
+  remove_silence: false
+  silence_threshold_db: -40.0
