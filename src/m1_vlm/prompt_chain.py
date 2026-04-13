@@ -48,6 +48,53 @@ class PromptChain:
         self.target_lang = target_lang
 
     # ─────────────────────────────────────────────────────────────────
+    # Global Summary (Pass 0)
+    # ─────────────────────────────────────────────────────────────────
+
+    def build_global_summary_prompt(self) -> str:
+        """
+        Build prompt for Pass 0: Global Video Understanding.
+
+        AI Researcher Perspective:
+            Hierarchical context is critical for coherent narration.
+            Without a global overview, each chunk is processed in isolation,
+            leading to:
+            - Inconsistent terminology across chunks
+            - Redundant introductions ("In this tutorial..." repeated)
+            - Missing cross-references ("as we saw earlier...")
+
+            Pass 0 samples ~15 frames across the full video to extract
+            a high-level outline BEFORE per-chunk processing begins.
+            This outline is then injected into every chunk's prompt,
+            giving each chunk awareness of the full video structure.
+
+        Returns:
+            Prompt string for global video analysis.
+        """
+        return """You are a video content analyst. Analyze these sampled frames from across the entire video to provide a high-level overview.
+
+## Your Tasks
+1. **Identify the main TOPIC** of this video (e.g., "Setting up a Python Flask web app")
+2. **List the major SECTIONS** in chronological order (e.g., ["Environment Setup", "Create Project", "Write API Routes", "Testing"])
+3. **Extract key TERMS** — technical terms, tool names, library names that appear throughout
+4. **Determine the STYLE** — tutorial, demo, presentation, code walkthrough, etc.
+5. **Write a brief SUMMARY** (2-3 sentences) of what this video covers
+
+## Output Format
+Return ONLY a JSON object:
+```json
+{
+  "topic": "Main topic of the video",
+  "style": "tutorial",
+  "sections": ["Section 1: ...", "Section 2: ..."],
+  "key_terms": ["term1", "term2"],
+  "summary": "Brief overview of the entire video content."
+}
+```
+
+Return ONLY the JSON. No markdown, no explanation."""
+
+    # ─────────────────────────────────────────────────────────────────
     # 3-Step Chain Mode
     # ─────────────────────────────────────────────────────────────────
 
@@ -55,6 +102,7 @@ class PromptChain:
         self,
         chunk_info: Optional[str] = None,
         context_summary: Optional[str] = None,
+        global_context: Optional[str] = None,
     ) -> str:
         """
         Step 1: Extract narration/script from video frames.
@@ -62,6 +110,16 @@ class PromptChain:
         The VLM looks at the screen to understand context,
         but only extracts the narration script (what the speaker
         is explaining or instructing), NOT the literal on-screen text.
+
+        AI Engineer Prompting Design:
+            The prompt uses a "observe → describe → narrate" chain-of-thought
+            structure that guides the VLM through the cognitive process:
+            1. First LOOK at what's on screen (grounding in visual evidence)
+            2. Then UNDERSTAND the action being performed (reasoning)
+            3. Finally WRITE narration for a viewer (generation)
+
+            This prevents the common failure mode where VLMs simply OCR
+            the screen text instead of generating meaningful narration.
         """
         prompt = f"""You are a video tutorial analyst. Your task is to write the narration script for a tutorial/demo video.
 
@@ -92,8 +150,17 @@ Return a JSON array:
 ```
 """
 
+        # Global context gives the VLM awareness of the full video structure
+        if global_context:
+            prompt += f"\n## Video Overview (Full Video Context)\n{global_context}\n"
+
         if chunk_info:
             prompt += f"\n## Video Chunk\n{chunk_info}\n"
+            prompt += (
+                "IMPORTANT: Generate narration ONLY for the time range of this chunk. "
+                "Your timestamps must start from 00:00:00 relative to this chunk's start. "
+                "Do NOT repeat or regenerate content from earlier parts of the video.\n"
+            )
 
         if context_summary:
             prompt += f"\n## Previous Context\n{context_summary}\n"
@@ -211,6 +278,7 @@ Return ONLY a JSON array:
         chunk_info: Optional[str] = None,
         context_summary: Optional[str] = None,
         previous_translations: Optional[str] = None,
+        global_context: Optional[str] = None,
     ) -> str:
         """
         All-in-one prompt: Extract + Translate + SRT in a single VLM call.
@@ -218,6 +286,14 @@ Return ONLY a JSON array:
         Recommended for:
         - Gemini (1M token context, fast)
         - Any model with large context window
+
+        AI Engineer Prompting Design:
+            This prompt combines all 3 steps into a single inference call.
+            The global_context parameter injects the Pass 0 video overview,
+            which dramatically improves:
+            - Terminology consistency (VLM knows all key terms upfront)
+            - Section awareness (VLM knows where this chunk fits in the video)
+            - Narration flow (avoids redundant introductions)
         """
         prompt = f"""You are an expert video tutorial analyst and {self.source_lang} to {self.target_lang} subtitle translator.
 
@@ -248,8 +324,19 @@ Analyze the provided video frames and create {self.target_lang} narration subtit
 - If too long, split into multiple entries
 """
 
+        # Global context: video-level overview from Pass 0
+        # This is the key architectural improvement — each chunk now "knows"
+        # the full video structure before processing its local content
+        if global_context:
+            prompt += f"\n## Video Overview (Full Video Context)\n{global_context}\n"
+
         if chunk_info:
             prompt += f"\n## Video Chunk\n{chunk_info}\n"
+            prompt += (
+                "IMPORTANT: Generate subtitles ONLY for the time range of this chunk. "
+                "Your timestamps must start from 00:00:00 relative to this chunk's start. "
+                "Do NOT repeat or regenerate content from earlier parts of the video.\n"
+            )
 
         if context_summary:
             prompt += f"\n## Context from Previous Chunks\n{context_summary}\n"

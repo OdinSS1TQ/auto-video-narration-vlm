@@ -1,16 +1,25 @@
 """
 Extract subtitles from a video using VLM (local Qwen2.5-VL or Gemini API).
 
-This is the REAL VLM pipeline — actually sends frames to the model
-and gets extracted/translated text back.
+This is the REAL VLM pipeline — sends frames to the model and gets
+extracted/translated narration back.
+
+Improvements integrated:
+  [P0] Adaptive frame sampling (scene-aware timestamps instead of fixed interval)
+  [P0] Global Summary Pass (Pass 0: video overview before per-chunk processing)
+  [P1] Overlapping chunks (5s overlap to preserve boundary context)
+  [P1] SSIM frame deduplication (remove visually redundant frames)
 
 Usage:
-    # Local Qwen2.5-VL
+    # Local Qwen2.5-VL (with all improvements)
     python scripts/run_vlm_extract.py --video path/to/video.mp4
 
     # Gemini API
     python scripts/run_vlm_extract.py --video path/to/video.mp4 --api --api-key YOUR_KEY
     python scripts/run_vlm_extract.py --video path/to/video.mp4 --api  (reads from .env)
+
+    # Legacy mode (fixed interval, no improvements)
+    python scripts/run_vlm_extract.py --video path/to/video.mp4 --legacy
 """
 
 import argparse
@@ -26,7 +35,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Extract subtitles from video using VLM",
+        description="Extract subtitles from video using VLM (with adaptive sampling)",
     )
     parser.add_argument("--video", "-v", type=str, required=True,
                         help="Path to video file")
@@ -46,8 +55,6 @@ def main():
                         help="Prompt mode: 'single' (all-in-one) or '3step' (chained)")
     parser.add_argument("--no-chunk", action="store_true",
                         help="Do NOT split video into chunks. Process entire video in one pass.")
-    parser.add_argument("--interval", type=float, default=2.0,
-                        help="Frame extraction interval in seconds (default: 2.0)")
     parser.add_argument("--chunk-duration", type=float, default=45.0,
                         help="Max chunk duration in seconds (default: 45)")
     parser.add_argument("--max-frames", type=int, default=None,
@@ -56,7 +63,28 @@ def main():
                         help="Scene detection threshold (default: 20.0)")
     parser.add_argument("--delay", type=float, default=None,
                         help="Delay between chunks in seconds (default: 30 for free API, 0 for local)")
+    # New improvement flags
+    parser.add_argument("--legacy", action="store_true",
+                        help="Use legacy mode (fixed 2s interval, no adaptive sampling, no global summary)")
+    parser.add_argument("--interval", type=float, default=2.0,
+                        help="Frame extraction interval in seconds (legacy mode only, default: 2.0)")
+    parser.add_argument("--ssim-threshold", type=float, default=0.85,
+                        help="SSIM threshold for frame dedup (0.80=aggressive, 0.85=balanced, 0.95=minimal)")
+    parser.add_argument("--no-dedup", action="store_true",
+                        help="Disable SSIM frame deduplication")
+    parser.add_argument("--no-global-summary", action="store_true",
+                        help="Skip Global Summary Pass (Pass 0)")
+    parser.add_argument("--overlap", type=float, default=5.0,
+                        help="Chunk overlap in seconds (default: 5.0, 0=no overlap)")
+    parser.add_argument("--global-frames", type=int, default=15,
+                        help="Number of frames for Global Summary Pass (default: 15)")
     args = parser.parse_args()
+
+    # Legacy mode disables all improvements
+    if args.legacy:
+        args.no_dedup = True
+        args.no_global_summary = True
+        args.overlap = 0.0
 
     # Set smart defaults based on backend and chunking mode
     if args.max_frames is None:
@@ -95,16 +123,22 @@ def main():
     (out_dir / "frames").mkdir(exist_ok=True)
 
     backend_name = f"Gemini API ({args.api_model})" if args.api else f"Local ({args.model})"
-    chunk_mode = "NO CHUNK (single pass)" if args.no_chunk else f"chunked ({args.chunk_duration}s)"
-    print(f"{'═' * 60}")
-    print(f"  VLM SUBTITLE EXTRACTION")
-    print(f"{'═' * 60}")
-    print(f"  Video:    {video_path.name}")
-    print(f"  Backend:  {backend_name}")
-    print(f"  Mode:     {args.mode}")
-    print(f"  Chunking: {chunk_mode}")
-    print(f"  Max frm:  {args.max_frames}")
-    print(f"  Output:   {out_dir.resolve()}")
+    chunk_mode = "NO CHUNK (single pass)" if args.no_chunk else f"chunked ({args.chunk_duration}s, overlap={args.overlap}s)"
+    sampling_mode = "LEGACY (fixed interval)" if args.legacy else "ADAPTIVE (scene-aware)"
+
+    print(f"{'═' * 65}")
+    print(f"  VLM SUBTITLE EXTRACTION — {'LEGACY' if args.legacy else 'IMPROVED'} PIPELINE")
+    print(f"{'═' * 65}")
+    print(f"  Video:      {video_path.name}")
+    print(f"  Backend:    {backend_name}")
+    print(f"  Mode:       {args.mode}")
+    print(f"  Chunking:   {chunk_mode}")
+    print(f"  Sampling:   {sampling_mode}")
+    if not args.legacy:
+        print(f"  SSIM dedup: {'OFF' if args.no_dedup else f'ON (threshold={args.ssim_threshold})'}")
+        print(f"  Global sum: {'OFF' if args.no_global_summary else f'ON ({args.global_frames} frames)'}")
+    print(f"  Max frm:    {args.max_frames}")
+    print(f"  Output:     {out_dir.resolve()}")
     print()
 
     # ── Step 1: Analyze video ────────────────────────────────────
@@ -122,16 +156,22 @@ def main():
     print(f"  Resolution: {width}x{height}, FPS: {fps:.1f}, Duration: {duration:.1f}s")
 
     # ── Step 2: Scene detection & chunking ────────────────────────
+    from src.m1_vlm.scene_detector import SceneDetector
+    from src.m1_vlm.frame_extractor import FrameExtractor
+    from src.m1_vlm.prompt_chain import PromptChain
+    from src.m1_vlm.context_window import ContextWindow
+
+    fe = FrameExtractor(max_width=768)
+    chain = PromptChain()
+    cw = ContextWindow(window_size=3)
+
     if args.no_chunk:
-        # ── No chunking: process entire video as one pass ──
         print("\n▶ Step 2: Skipping scene detection (--no-chunk mode)...")
         chunks = [(0.0, duration)]
         print(f"  Single pass: 0.0s — {duration:.1f}s ({duration:.1f}s)")
+        sd = None
     else:
-        # ── Scene detection & chunking ──
         print("\n▶ Step 2: Detecting scenes...")
-        from src.m1_vlm.scene_detector import SceneDetector
-
         sd = SceneDetector(threshold=args.threshold)
         scenes = sd.detect_scenes(video_path)
 
@@ -141,6 +181,7 @@ def main():
                 sd2 = SceneDetector(threshold=t)
                 scenes = sd2.detect_scenes(video_path)
                 if scenes:
+                    sd = sd2
                     print(f"  Found {len(scenes)} scenes (threshold={t})")
                     break
 
@@ -148,30 +189,151 @@ def main():
             scenes = [(0.0, duration)]
             print(f"  No scene cuts → 1 chunk")
 
-        chunks = sd.split_into_chunks(video_path, chunk_duration=args.chunk_duration)
+        # Use overlapping chunks (P1 improvement)
+        chunks = sd.split_into_chunks(
+            video_path,
+            chunk_duration=args.chunk_duration,
+            overlap=args.overlap,
+        )
         if not chunks:
             chunks = [(0.0, duration)]
 
-        print(f"  {len(scenes)} scenes → {len(chunks)} chunks")
+        print(f"  {len(scenes)} scenes → {len(chunks)} chunks (overlap={args.overlap}s)")
         for i, (s, e) in enumerate(chunks):
             print(f"    Chunk {i}: {s:.1f}s — {e:.1f}s ({e-s:.1f}s)")
 
-    # ── Step 3: Extract frames ───────────────────────────────────
-    print("\n▶ Step 3: Extracting frames...")
-    from src.m1_vlm.frame_extractor import FrameExtractor
+    # ── Step 2.5: Global Summary Pass (P0 improvement) ──────────
+    global_summary_text = None
+    if not args.no_global_summary:
+        print(f"\n▶ Step 2.5: Global Summary Pass ({args.global_frames} frames)...")
 
-    fe = FrameExtractor(max_width=768)
+        t0 = time.perf_counter()
+        global_frames = fe.extract_frames_evenly(video_path, n=args.global_frames)
+        print(f"  Sampled {len(global_frames)} frames evenly across video")
+
+        if global_frames:
+            global_images_b64 = fe.frames_to_base64_batch(global_frames)
+            total_b64_kb = sum(len(b) for b in global_images_b64) / 1024
+            print(f"  Total base64 size: {total_b64_kb:.0f} KB")
+
+            # Save global frames for inspection
+            for i, frame in enumerate(global_frames):
+                fname = f"global_frame_{i:02d}.jpg"
+                cv2.imwrite(str(out_dir / "frames" / fname), frame)
+
+            # Build global summary prompt
+            global_prompt = chain.build_global_summary_prompt()
+
+            # Initialize VLM early for global summary
+            print(f"  Running VLM for global overview...")
+            from src.m1_vlm.vlm_client import VLMClient
+
+            t_vlm = time.perf_counter()
+            if args.api:
+                vlm = VLMClient(
+                    mode="api", model_name=args.api_model,
+                    api_key=api_key, temperature=0.1, max_tokens=4096,
+                )
+                vlm._init_api_client()
+            else:
+                vlm = VLMClient(
+                    mode="local", local_model_path=args.model,
+                    temperature=0.1, max_tokens=4096,
+                )
+                vlm._init_local_client()
+            vlm_load_time = time.perf_counter() - t_vlm
+
+            # Limit global frames for VLM context
+            if len(global_images_b64) > args.max_frames:
+                step = len(global_images_b64) / args.max_frames
+                global_images_b64 = [global_images_b64[int(i * step)] for i in range(args.max_frames)]
+                print(f"  Trimmed to {len(global_images_b64)} frames for VLM (max_frames={args.max_frames})")
+
+            raw_global = asyncio.run(
+                vlm.generate(prompt=global_prompt, images_base64=global_images_b64)
+            )
+
+            # Save raw global response
+            (out_dir / "global_summary_raw.txt").write_text(raw_global, encoding="utf-8")
+
+            # Try to parse
+            cleaned = raw_global.strip()
+            if cleaned.startswith("```json"):
+                cleaned = cleaned[7:]
+            if cleaned.startswith("```"):
+                cleaned = cleaned[3:]
+            if cleaned.endswith("```"):
+                cleaned = cleaned[:-3]
+
+            try:
+                global_parsed = json.loads(cleaned.strip())
+                global_summary_text = json.dumps(global_parsed, indent=2, ensure_ascii=False)
+                cw.set_global_summary(global_summary_text)
+
+                elapsed = time.perf_counter() - t0
+                print(f"  ✅ Global summary generated in {elapsed:.1f}s")
+                print(f"     Topic:    {global_parsed.get('topic', 'N/A')}")
+                print(f"     Style:    {global_parsed.get('style', 'N/A')}")
+                sections = global_parsed.get('sections', [])
+                if sections:
+                    print(f"     Sections: {', '.join(sections[:5])}")
+                terms = global_parsed.get('key_terms', [])
+                if terms:
+                    print(f"     Terms:    {', '.join(terms[:10])}")
+
+                # Save formatted global summary
+                (out_dir / "global_summary.json").write_text(
+                    global_summary_text, encoding="utf-8"
+                )
+
+            except json.JSONDecodeError as e:
+                print(f"  ⚠ Global summary JSON parse failed: {e}")
+                print(f"    Using raw text as global context")
+                global_summary_text = raw_global
+                cw.set_global_summary(global_summary_text)
+
+            vlm_initialized = True
+        else:
+            print("  ⚠ Could not extract global frames")
+            vlm_initialized = False
+    else:
+        vlm_initialized = False
+
+    # ── Step 3: Extract frames (adaptive or fixed) ───────────────
+    print(f"\n▶ Step 3: Extracting frames ({'ADAPTIVE' if not args.legacy else 'FIXED interval'})...")
+
+    # Optional: SSIM deduplicator
+    dedup = None
+    if not args.no_dedup:
+        from src.m1_vlm.frame_dedup import FrameDeduplicator
+        dedup = FrameDeduplicator(ssim_threshold=args.ssim_threshold)
 
     chunk_frames = {}  # chunk_index -> [(timestamp, frame, base64)]
     total_extracted = 0
+    total_before_dedup = 0
 
     for ci, (start, end) in enumerate(chunks):
-        results = fe.extract_frames_in_range(
-            video_path, start_time=start, end_time=end, interval=args.interval,
-        )
+        if args.legacy or sd is None:
+            # Legacy: fixed interval sampling
+            results = fe.extract_frames_in_range(
+                video_path, start_time=start, end_time=end, interval=args.interval,
+            )
+        else:
+            # Improved: adaptive scene-aware sampling
+            timestamps = sd.get_adaptive_timestamps(
+                video_path, start, end,
+                min_frames=3, max_frames=args.max_frames * 2,
+            )
+            results = fe.extract_frames_at_timestamps(video_path, timestamps)
+
+        total_before_dedup += len(results)
+
+        # SSIM deduplication (P1 improvement)
+        if dedup and len(results) > 1:
+            results = dedup.deduplicate(results)
+
         # Limit frames per chunk
         if len(results) > args.max_frames:
-            # Sample evenly
             step = len(results) / args.max_frames
             results = [results[int(i * step)] for i in range(args.max_frames)]
 
@@ -179,53 +341,55 @@ def main():
         for ts, frame in results:
             b64 = fe.frame_to_base64(frame)
             frames_data.append((ts, frame, b64))
-            # Save frame
+            # Save frame for inspection
             fname = f"chunk{ci}_t{ts:.1f}s.jpg"
             cv2.imwrite(str(out_dir / "frames" / fname), frame)
 
         chunk_frames[ci] = frames_data
         total_extracted += len(frames_data)
-        print(f"  Chunk {ci}: {len(frames_data)} frames")
 
-    print(f"  Total: {total_extracted} frames extracted & saved")
+        dedup_info = ""
+        if dedup and total_before_dedup > total_extracted:
+            dedup_info = f" (before dedup: {total_before_dedup})"
+        print(f"  Chunk {ci}: {len(frames_data)} frames — "
+              f"timestamps: {[f'{ts:.1f}s' for ts, _, _ in frames_data]}")
 
-    # ── Step 4: Initialize VLM ───────────────────────────────────
-    print(f"\n▶ Step 4: Initializing VLM ({backend_name})...")
-    from src.m1_vlm.vlm_client import VLMClient
+    print(f"  Total: {total_extracted} frames extracted & saved{dedup_info}")
+    if not args.legacy and total_before_dedup > 0:
+        saved_pct = (1 - total_extracted / total_before_dedup) * 100
+        print(f"  📊 SSIM dedup: {total_before_dedup} → {total_extracted} "
+              f"({saved_pct:.0f}% redundant frames removed)")
 
-    t0 = time.perf_counter()
+    # ── Step 4: Initialize VLM (if not already done in global summary) ──
+    if not vlm_initialized:
+        print(f"\n▶ Step 4: Initializing VLM ({backend_name})...")
+        from src.m1_vlm.vlm_client import VLMClient
 
-    if args.api:
-        vlm = VLMClient(
-            mode="api",
-            model_name=args.api_model,
-            api_key=api_key,
-            temperature=0.1,
-            max_tokens=4096,
-        )
-        vlm._init_api_client()
-        load_time = time.perf_counter() - t0
-        print(f"  Gemini API ready in {load_time:.1f}s (model: {args.api_model})")
+        t0 = time.perf_counter()
+
+        if args.api:
+            vlm = VLMClient(
+                mode="api", model_name=args.api_model,
+                api_key=api_key, temperature=0.1, max_tokens=4096,
+            )
+            vlm._init_api_client()
+            load_time = time.perf_counter() - t0
+            print(f"  Gemini API ready in {load_time:.1f}s (model: {args.api_model})")
+        else:
+            vlm = VLMClient(
+                mode="local", local_model_path=args.model,
+                temperature=0.1, max_tokens=4096,
+            )
+            vlm._init_local_client()
+            load_time = time.perf_counter() - t0
+            import torch
+            vram = torch.cuda.memory_allocated() / 1024**3 if torch.cuda.is_available() else 0
+            print(f"  Loaded in {load_time:.1f}s, VRAM: {vram:.2f} GB")
     else:
-        vlm = VLMClient(
-            mode="local",
-            local_model_path=args.model,
-            temperature=0.1,
-            max_tokens=4096,
-        )
-        vlm._init_local_client()
-        load_time = time.perf_counter() - t0
-        import torch
-        vram = torch.cuda.memory_allocated() / 1024**3 if torch.cuda.is_available() else 0
-        print(f"  Loaded in {load_time:.1f}s, VRAM: {vram:.2f} GB")
+        print(f"\n▶ Step 4: VLM already initialized (from Global Summary Pass)")
 
     # ── Step 5: Run VLM inference on each chunk ──────────────────
     print(f"\n▶ Step 5: Running VLM inference ({args.mode} mode)...")
-    from src.m1_vlm.prompt_chain import PromptChain
-    from src.m1_vlm.context_window import ContextWindow
-
-    chain = PromptChain()
-    cw = ContextWindow(window_size=3)
     all_results = []
 
     for ci, (start, end) in enumerate(chunks):
@@ -255,11 +419,12 @@ def main():
         t0 = time.perf_counter()
 
         if args.mode == "single":
-            # All-in-one prompt
+            # All-in-one prompt (with global context if available)
             prompt = chain.build_single_prompt(
                 chunk_info=chunk_info,
                 context_summary=cw.get_context_summary() or None,
                 previous_translations=cw.get_previous_translations(limit=3) or None,
+                global_context=cw.get_global_summary(),  # ← P0 improvement
             )
 
             raw_response = asyncio.run(
@@ -267,11 +432,12 @@ def main():
             )
 
         else:
-            # 3-step chain
+            # 3-step chain (with global context if available)
             # Step 1: Extract
             p1 = chain.step1_extract(
                 chunk_info=chunk_info,
                 context_summary=cw.get_context_summary() or None,
+                global_context=cw.get_global_summary(),  # ← P0 improvement
             )
             raw_step1 = asyncio.run(
                 vlm.generate(prompt=p1, images_base64=b64_images)
@@ -378,10 +544,19 @@ def main():
             entries = validator.fix_overlaps(entries)
             entries = validator.reindex(entries)
 
-        builder.add_entries(entries)
+        chunk_start = result.get("chunk_start", 0.0)
+        builder.add_entries(entries, chunk_offset=chunk_start)
         total_entries += len(entries)
 
     if total_entries > 0:
+        # Deduplicate overlapping entries from chunk overlaps
+        pre_dedup = builder.entry_count
+        builder.deduplicate_entries(overlap_tolerance=0.5)
+        post_dedup = builder.entry_count
+        if pre_dedup != post_dedup:
+            print(f"  Deduplicated: {pre_dedup} → {post_dedup} entries")
+            total_entries = post_dedup
+
         srt_path = builder.save(out_dir / f"{video_path.stem}.srt")
         print(f"  ✓ SRT saved: {srt_path.name} ({total_entries} entries)")
         print()
@@ -400,9 +575,14 @@ def main():
         "model": args.api_model if args.api else args.model,
         "backend": "gemini_api" if args.api else "local",
         "mode": args.mode,
+        "pipeline": "legacy" if args.legacy else "improved",
         "duration": duration,
         "chunks": len(chunks),
-        "total_frames": total_extracted,
+        "chunk_overlap": args.overlap,
+        "total_frames_before_dedup": total_before_dedup,
+        "total_frames_after_dedup": total_extracted,
+        "ssim_threshold": args.ssim_threshold if not args.no_dedup else None,
+        "global_summary": global_summary_text,
         "total_entries": total_entries,
         "results": all_results,
     }
@@ -413,14 +593,15 @@ def main():
     # Cleanup VLM
     vlm.unload_model()
 
-    print(f"\n{'═' * 60}")
-    print(f"  DONE")
-    print(f"{'═' * 60}")
-    print(f"  Video:    {video_path.name} ({duration:.1f}s)")
-    print(f"  Chunks:   {len(chunks)}")
-    print(f"  Frames:   {total_extracted}")
-    print(f"  Entries:  {total_entries}")
-    print(f"  Output:   {out_dir.resolve()}")
+    print(f"\n{'═' * 65}")
+    print(f"  DONE — {'LEGACY' if args.legacy else 'IMPROVED'} PIPELINE")
+    print(f"{'═' * 65}")
+    print(f"  Video:        {video_path.name} ({duration:.1f}s)")
+    print(f"  Chunks:       {len(chunks)} (overlap={args.overlap}s)")
+    print(f"  Frames:       {total_before_dedup} extracted → {total_extracted} after dedup")
+    print(f"  Global sum:   {'Yes' if global_summary_text else 'No'}")
+    print(f"  SRT entries:  {total_entries}")
+    print(f"  Output:       {out_dir.resolve()}")
     print()
     print(f"  Files:")
     for f in sorted(out_dir.rglob("*")):
