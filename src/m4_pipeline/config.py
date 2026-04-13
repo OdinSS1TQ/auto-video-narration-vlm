@@ -89,6 +89,19 @@ class PipelineConfig:
     def scene_threshold(self) -> float:
         return float(os.getenv("SCENE_THRESHOLD", "27.0"))
 
+    @property
+    def chunk_overlap(self) -> float:
+        """Overlap duration (seconds) between consecutive chunks.
+        Prevents context loss at chunk boundaries."""
+        return float(os.getenv("CHUNK_OVERLAP_SEC", "5"))
+
+    @property
+    def ssim_threshold(self) -> float:
+        """SSIM threshold for frame deduplication.
+        Frames with SSIM > threshold are considered duplicates.
+        0.85 = balanced for tutorial videos."""
+        return float(os.getenv("SSIM_THRESHOLD", "0.85"))
+
     # === Data Paths ===
     @property
     def output_dir(self) -> str:

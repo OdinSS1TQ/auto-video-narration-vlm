@@ -59,6 +59,51 @@ class SRTBuilder:
 
         return "\n".join(lines)
 
+    def deduplicate_entries(self, overlap_tolerance: float = 0.5):
+        """
+        Remove duplicate/overlapping entries after merging chunks.
+
+        When chunks overlap (e.g. 5s overlap), both chunks may generate
+        subtitles for the overlapping region. This method keeps only the
+        entries from the earlier chunk and removes duplicates.
+
+        Args:
+            overlap_tolerance: Time tolerance in seconds for detecting overlaps.
+                               Entries starting within this window of each other
+                               are considered duplicates.
+        """
+        if len(self._entries) < 2:
+            return
+
+        # Sort by start time
+        sorted_entries = sorted(
+            self._entries,
+            key=lambda e: self._timestamp_to_seconds(e["start_time"]),
+        )
+
+        deduped = [sorted_entries[0]]
+        for entry in sorted_entries[1:]:
+            prev = deduped[-1]
+            prev_end = self._timestamp_to_seconds(prev["end_time"])
+            curr_start = self._timestamp_to_seconds(entry["start_time"])
+
+            # Skip if this entry overlaps significantly with the previous one
+            # This catches duplicates from chunk overlap regions
+            if curr_start < prev_end - overlap_tolerance:
+                continue
+
+            deduped.append(entry)
+
+        removed = len(self._entries) - len(deduped)
+        if removed > 0:
+            from loguru import logger as _logger
+            _logger.info(
+                f"Deduplicated: {len(self._entries)} → {len(deduped)} "
+                f"entries ({removed} overlapping entries removed)"
+            )
+
+        self._entries = deduped
+
     def save(self, output_path: str | Path, encoding: str = "utf-8") -> Path:
         """
         Save SRT content to file.
