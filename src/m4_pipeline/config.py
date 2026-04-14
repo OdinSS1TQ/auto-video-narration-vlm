@@ -53,7 +53,7 @@ class PipelineConfig:
     # === Local Model Paths ===
     @property
     def qwen_model_path(self) -> str:
-        return os.getenv("QWEN_MODEL_PATH", "./models/qwen2-vl-7b-q4")
+        return os.getenv("QWEN_MODEL_PATH", "./models/qwen3.5-2b")
 
     @property
     def glm_ocr_model_path(self) -> str:

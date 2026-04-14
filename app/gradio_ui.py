@@ -42,7 +42,7 @@ def create_ui() -> gr.Blocks:
 
                 with gr.Row():
                     vlm_mode = gr.Radio(
-                        choices=["API (Gemini)", "Local (Qwen2-VL)"],
+                        choices=["API (Gemini)", "Local (Qwen3.5)", "Local (Qwen2.5-VL Legacy)"],
                         value="API (Gemini)",
                         label="VLM Mode",
                     )

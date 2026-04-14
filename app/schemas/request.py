@@ -11,7 +11,7 @@ class ProcessRequest(BaseModel):
     audio_path: str = Field(..., description="Path to reference audio file")
     vlm_mode: str = Field(
         default="api",
-        description="VLM mode: 'api' (Gemini) or 'local' (Qwen2-VL)"
+        description="VLM mode: 'api' (Gemini) or 'local' (Qwen3.5 default / Qwen2.5-VL legacy)"
     )
     tts_engine: str = Field(
         default="f5-tts",

@@ -1,5 +1,5 @@
 """
-Extract subtitles from a video using VLM (local Qwen2.5-VL or Gemini API).
+Extract subtitles from a video using VLM (local Qwen3.5/Qwen2.5-VL or Gemini API).
 
 This is the REAL VLM pipeline — sends frames to the model and gets
 extracted/translated narration back.
@@ -11,8 +11,11 @@ Improvements integrated:
   [P1] SSIM frame deduplication (remove visually redundant frames)
 
 Usage:
-    # Local Qwen2.5-VL (with all improvements)
+    # Local Qwen3.5-0.8B (default, with all improvements)
     python scripts/run_vlm_extract.py --video path/to/video.mp4
+
+    # Local Qwen2.5-VL-3B (legacy)
+    python scripts/run_vlm_extract.py --video path/to/video.mp4 --model ./models/qwen2.5-vl-3b
 
     # Gemini API
     python scripts/run_vlm_extract.py --video path/to/video.mp4 --api --api-key YOUR_KEY
@@ -48,8 +51,10 @@ def main():
                         help="Gemini API key (or set GEMINI_API_KEY in .env)")
     parser.add_argument("--api-model", type=str, default="gemini-2.5-flash-lite",
                         help="Gemini model name (default: gemini-2.5-flash-lite)")
-    parser.add_argument("--model", type=str, default="./models/qwen2.5-vl-3b",
-                        help="Local model path (default: ./models/qwen2.5-vl-3b)")
+    parser.add_argument("--model", type=str, default="./models/qwen3.5-2b",
+                        help="Local model path (default: ./models/qwen3.5-2b)")
+    parser.add_argument("--qwen25", action="store_true",
+                        help="Use legacy Qwen2.5-VL-3B model instead of default Qwen3.5")
     # Processing options
     parser.add_argument("--mode", choices=["single", "3step"], default="single",
                         help="Prompt mode: 'single' (all-in-one) or '3step' (chained)")
@@ -79,6 +84,10 @@ def main():
     parser.add_argument("--global-frames", type=int, default=15,
                         help="Number of frames for Global Summary Pass (default: 15)")
     args = parser.parse_args()
+
+    # --qwen25 convenience flag: switch to legacy model path
+    if args.qwen25 and args.model == "./models/qwen3.5-2b":
+        args.model = "./models/qwen2.5-vl-3b"
 
     # Legacy mode disables all improvements
     if args.legacy:
@@ -419,12 +428,17 @@ def main():
         t0 = time.perf_counter()
 
         if args.mode == "single":
-            # All-in-one prompt (with global context if available)
+            # All-in-one prompt (with global context + frame timestamps)
             prompt = chain.build_single_prompt(
                 chunk_info=chunk_info,
                 context_summary=cw.get_context_summary() or None,
-                previous_translations=cw.get_previous_translations(limit=3) or None,
-                global_context=cw.get_global_summary(),  # ← P0 improvement
+                previous_translations=cw.get_previous_translations(limit=10) or None,
+                global_context=cw.get_global_summary(),
+                frame_timestamps=timestamps,
+                chunk_start=start,
+                chunk_end=end,
+                chunk_index=ci,
+                total_chunks=len(chunks),
             )
 
             raw_response = asyncio.run(
@@ -544,8 +558,9 @@ def main():
             entries = validator.fix_overlaps(entries)
             entries = validator.reindex(entries)
 
-        chunk_start = result.get("chunk_start", 0.0)
-        builder.add_entries(entries, chunk_offset=chunk_start)
+        # Since prompts now generate ABSOLUTE timestamps,
+        # we do NOT add chunk_offset (timestamps are already correct)
+        builder.add_entries(entries, chunk_offset=0.0)
         total_entries += len(entries)
 
     if total_entries > 0:
