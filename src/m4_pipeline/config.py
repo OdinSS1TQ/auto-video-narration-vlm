@@ -78,9 +78,12 @@ class PipelineConfig:
 
     # --- VieNeu-TTS v2 Turbo specific ---
     @property
-    def tts_backbone_repo(self) -> str:
-        """HuggingFace repo for VieNeu backbone LLM."""
-        return os.getenv("TTS_BACKBONE_REPO", "pnnbao-ump/VieNeu-TTS-v2-Turbo")
+    def tts_backbone_repo(self) -> Optional[str]:
+        """HuggingFace repo for VieNeu backbone LLM. None = let vieneu SDK
+        pick its internal defaults (which are version-aware and known-good).
+        Override only if you have a custom backbone."""
+        repo = os.getenv("TTS_BACKBONE_REPO", "")
+        return repo if repo else None
 
     @property
     def tts_backbone_device(self) -> str:
@@ -89,13 +92,15 @@ class PipelineConfig:
 
     @property
     def tts_codec_device(self) -> str:
-        """Device for NeuCodec decoder ('cuda' or 'cpu')."""
-        return os.getenv("TTS_CODEC_DEVICE", "cuda")
+        """Device for NeuCodec decoder ('cuda' or 'cpu'). CPU is fine — codec
+        is small ONNX, GPU saves only ~50ms but contends with backbone VRAM."""
+        return os.getenv("TTS_CODEC_DEVICE", "cpu")
 
     @property
     def tts_vieneu_mode(self) -> str:
-        """Vieneu() factory mode: 'standard' | 'fast' | 'remote'."""
-        return os.getenv("TTS_VIENEU_MODE", "standard")
+        """Vieneu() factory mode: 'turbo' (default, GGUF+ONNX) | 'standard'
+        (PyTorch, needs neucodec pkg) | 'fast' | 'remote'."""
+        return os.getenv("TTS_VIENEU_MODE", "turbo")
 
     @property
     def tts_hf_token(self) -> Optional[str]:

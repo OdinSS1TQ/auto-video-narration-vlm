@@ -137,17 +137,17 @@ class PipelineRunner:
                     video_path, start, end,
                     min_frames=3, max_frames=max_frames * 2,
                 )
-                results = frame_extractor.extract_frames_at_timestamps(
+                chunk_frames = frame_extractor.extract_frames_at_timestamps(
                     video_path, timestamps
                 )
-                total_before_dedup += len(results)
-                if len(results) > 1:
-                    results = dedup.deduplicate(results)
-                if len(results) > max_frames:
-                    step = len(results) / max_frames
-                    results = [results[int(j * step)] for j in range(max_frames)]
-                total_after_dedup += len(results)
-                all_frames[i] = results
+                total_before_dedup += len(chunk_frames)
+                if len(chunk_frames) > 1:
+                    chunk_frames = dedup.deduplicate(chunk_frames)
+                if len(chunk_frames) > max_frames:
+                    step = len(chunk_frames) / max_frames
+                    chunk_frames = [chunk_frames[int(j * step)] for j in range(max_frames)]
+                total_after_dedup += len(chunk_frames)
+                all_frames[i] = chunk_frames
 
             logger.info(
                 f"Extracted frames for {len(chunks)} chunks: "
@@ -175,31 +175,76 @@ class PipelineRunner:
             validator = SubtitleValidator()
             srt_builder = SRTBuilder()
 
+            import json as _json
             for chunk_idx, (start, end) in enumerate(chunks):
                 frames = all_frames.get(chunk_idx, [])
+                if not frames:
+                    logger.warning(f"Chunk {chunk_idx}: no frames, skipping VLM call")
+                    continue
+
                 frame_images = [
                     frame_extractor.frame_to_base64(f) for _, f in frames
                 ]
+                timestamps = [t for t, _ in frames]
 
-                prompt = prompt_chain.build_single_prompt(
-                    chunk_info=f"Chunk {chunk_idx}: {start:.1f}s — {end:.1f}s",
-                    context_summary=context_window.get_context_summary(),
+                chunk_info = (
+                    f"Chunk {chunk_idx}: {start:.1f}s — {end:.1f}s\n"
+                    f"Video: {video_path.name}\n"
+                    f"Frames at timestamps: {[f'{t:.1f}s' for t in timestamps]}"
                 )
 
-                entries = await vlm_client.generate_json(
+                prompt = prompt_chain.build_single_prompt(
+                    chunk_info=chunk_info,
+                    context_summary=context_window.get_context_summary() or None,
+                    previous_translations=context_window.get_previous_translations(limit=10) or None,
+                    global_context=context_window.get_global_summary(),
+                    frame_timestamps=timestamps,
+                    chunk_start=start,
+                    chunk_end=end,
+                    chunk_index=chunk_idx,
+                    total_chunks=len(chunks),
+                )
+
+                # Use generate() + manual JSON parse so an invalid response
+                # from one chunk doesn't kill the whole pipeline.
+                raw_response = await vlm_client.generate(
                     prompt=prompt,
                     images_base64=frame_images,
                 )
 
-                # Validate and fix
-                if isinstance(entries, list):
-                    valid, issues = validator.validate_sequence(entries)
-                    if not valid:
-                        entries = validator.fix_overlaps(entries)
-                        entries = validator.reindex(entries)
+                cleaned = raw_response.strip()
+                if cleaned.startswith("```json"):
+                    cleaned = cleaned[7:]
+                if cleaned.startswith("```"):
+                    cleaned = cleaned[3:]
+                if cleaned.endswith("```"):
+                    cleaned = cleaned[:-3]
 
-                    srt_builder.add_entries(entries, chunk_offset=0.0)
-                    context_window.add_chunk_result(chunk_idx, entries)
+                try:
+                    entries = _json.loads(cleaned.strip())
+                except _json.JSONDecodeError as exc:
+                    logger.warning(
+                        f"Chunk {chunk_idx}: VLM response not valid JSON ({exc}); "
+                        f"raw response saved to debug log"
+                    )
+                    logger.debug(f"Raw VLM response for chunk {chunk_idx}:\n{raw_response}")
+                    continue
+
+                if not isinstance(entries, list):
+                    logger.warning(
+                        f"Chunk {chunk_idx}: VLM returned non-list ({type(entries).__name__}); skipping"
+                    )
+                    continue
+
+                valid, issues = validator.validate_sequence(entries)
+                if not valid:
+                    logger.debug(f"Chunk {chunk_idx}: validation issues fixed: {issues}")
+                    entries = validator.fix_overlaps(entries)
+                    entries = validator.reindex(entries)
+
+                srt_builder.add_entries(entries, chunk_offset=0.0)
+                context_window.add_chunk_result(chunk_idx, entries)
+                logger.info(f"Chunk {chunk_idx}: parsed {len(entries)} subtitle entries")
 
             # === Step 5: SRT Generation ===
             self._update_progress("srt_generation")
