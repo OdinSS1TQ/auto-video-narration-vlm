@@ -15,6 +15,7 @@ from src.m4_pipeline.config import PipelineConfig
 from src.m4_pipeline.exceptions import PipelineError
 from src.m1_vlm.scene_detector import SceneDetector
 from src.m1_vlm.frame_extractor import FrameExtractor
+from src.m1_vlm.frame_dedup import FrameDeduplicator
 from src.m1_vlm.prompt_chain import PromptChain
 from src.m1_vlm.vlm_client import VLMClient
 from src.m1_vlm.validator import SubtitleValidator
@@ -120,16 +121,39 @@ class PipelineRunner:
             results["chunks"] = len(chunks)
             logger.info(f"Detected {len(chunks)} chunks")
 
-            # === Step 2: Frame Extraction ===
+            # === Step 2: Frame Extraction (adaptive + SSIM dedup) ===
+            # Mirrors scripts/run_vlm_extract.py — fixed-interval sampling
+            # generates 30+ frames for a 60s chunk and OOMs the VLM.
             self._update_progress("frame_extraction")
-            frame_extractor = FrameExtractor()
+            frame_extractor = FrameExtractor(max_width=768)
+            dedup = FrameDeduplicator(ssim_threshold=0.85)
+            max_frames = 8
+
             all_frames = {}
+            total_before_dedup = 0
+            total_after_dedup = 0
             for i, (start, end) in enumerate(chunks):
-                frames = frame_extractor.extract_frames_in_range(
-                    video_path, start, end, interval=2.0
+                timestamps = scene_detector.get_adaptive_timestamps(
+                    video_path, start, end,
+                    min_frames=3, max_frames=max_frames * 2,
                 )
-                all_frames[i] = frames
-            logger.info(f"Extracted frames for {len(chunks)} chunks")
+                results = frame_extractor.extract_frames_at_timestamps(
+                    video_path, timestamps
+                )
+                total_before_dedup += len(results)
+                if len(results) > 1:
+                    results = dedup.deduplicate(results)
+                if len(results) > max_frames:
+                    step = len(results) / max_frames
+                    results = [results[int(j * step)] for j in range(max_frames)]
+                total_after_dedup += len(results)
+                all_frames[i] = results
+
+            logger.info(
+                f"Extracted frames for {len(chunks)} chunks: "
+                f"{total_before_dedup} → {total_after_dedup} after SSIM dedup "
+                f"(max_frames={max_frames})"
+            )
 
             # === Step 3: OCR (optional) ===
             self._update_progress("ocr_extraction")
