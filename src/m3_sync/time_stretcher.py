@@ -4,6 +4,7 @@ Time Stretcher — Rubberband wrapper for pitch-preserving time stretching.
 Adjusts audio duration to match subtitle timestamps without changing pitch.
 """
 
+import os
 import subprocess
 import tempfile
 from pathlib import Path
@@ -17,12 +18,15 @@ from loguru import logger
 class TimeStretcher:
     """Time-stretch audio using rubberband for quality pitch preservation."""
 
-    def __init__(self, rubberband_path: str = "rubberband"):
+    def __init__(self, rubberband_path: Optional[str] = None):
         """
         Args:
-            rubberband_path: Path to rubberband CLI binary.
+            rubberband_path: Path to rubberband CLI binary. If None, reads
+                env var RUBBERBAND_PATH, falling back to "rubberband" on PATH.
         """
-        self.rubberband_path = rubberband_path
+        self.rubberband_path = (
+            rubberband_path or os.getenv("RUBBERBAND_PATH") or "rubberband"
+        )
         self._check_rubberband()
 
     def _check_rubberband(self):
