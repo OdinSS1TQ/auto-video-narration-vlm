@@ -172,7 +172,7 @@ class PipelineRunner:
                         entries = validator.fix_overlaps(entries)
                         entries = validator.reindex(entries)
 
-                    srt_builder.add_entries(entries, chunk_offset=start)
+                    srt_builder.add_entries(entries, chunk_offset=0.0)
                     context_window.add_chunk_result(chunk_idx, entries)
 
             # === Step 5: SRT Generation ===
@@ -232,7 +232,10 @@ class PipelineRunner:
             # Merge audio
             merged_audio_path = work_dir / "merged_audio.wav"
             renderer.merge_audio_segments(
-                aligned_segments, duration, merged_audio_path
+                aligned_segments,
+                duration,
+                merged_audio_path,
+                sample_rate=24000,
             )
 
             # Final render
