@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__plugin_context7_context7__resolve-library-id",
+      "mcp__plugin_context7_context7__query-docs",
+      "Bash(.venv/Scripts/python scripts/test_m1_m2_integration.py)",
+      "Bash(.venv/Scripts/python scripts/test_m1_m2_integration.py --ref-audio \".venv/Lib/site-packages/vieneu/assets/samples/Đoan \\(nữ miền Nam\\).wav\" --output-dir debug_output/m1_m2_integration_female)",
+      "Bash(.venv/Scripts/python -c ' *)",
+      "Bash(.venv/Scripts/python scripts/test_m1_m2_integration.py --ref-audio \"data/reference_audio/speaker.wav\" --output-dir debug_output/m1_m2_integration_real_ref)",
+      "Bash(.venv/Scripts/python -c \"import pypdf; print\\('pypdf available'\\)\")",
+      "Bash(.venv/Scripts/python -c \"import fitz; print\\('fitz available'\\)\")",
+      "Bash(.venv/Scripts/python -c \"import pdfplumber; print\\('pdfplumber available'\\)\")",
+      "Read(//h/Quan/tanquan/VNext/ToyoBeauty/**)",
+      "Read(//h/Quan/tanquan/PBL5/PBL05_smart_home_with_voice_print/AI Module/transformer/data/audio/user_D/**)",
+      "Bash(ls .venv/Scripts/python.exe)",
+      "Bash(ls venv/Scripts/python.exe)",
+      "Bash(ls .venv/bin/python)",
+      "Bash(ls venv/bin/python)",
+      "Bash(.venv/Scripts/python.exe scripts/run_tts_voice_cloning.py --video \"H:\\\\Quan\\\\tanquan\\\\VNext\\\\ToyoBeauty\\\\【VNEXT】【ToyoBeauty】Demo-Module-5.mp4\" --ref-audio \"H:\\\\Quan\\\\tanquan\\\\PBL5\\\\PBL05_smart_home_with_voice_print\\\\AI Module\\\\transformer\\\\data\\\\audio\\\\user_D\\\\user_D_1.wav\" --voice-mode clone)"
+    ]
+  }
+}

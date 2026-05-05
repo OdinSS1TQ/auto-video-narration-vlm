@@ -1,0 +1,39 @@
+1
+00:00:01,000 --> 00:00:03,500
+Xin chào và hoan nghênh các bạn đến với chương trình hôm nay.
+
+2
+00:00:04,000 --> 00:00:06,800
+Trong tập này, chúng ta sẽ tìm hiểu về trí tuệ nhân tạo.
+
+3
+00:00:07,500 --> 00:00:10,200
+Trí tuệ nhân tạo đang thay đổi cách chúng ta sống và làm việc.
+
+4
+00:00:11,000 --> 00:00:14,500
+Các mô hình ngôn ngữ lớn có thể hiểu và tạo ra văn bản tự nhiên.
+
+5
+00:00:15,000 --> 00:00:18,300
+Công nghệ nhận diện giọng nói đã tiến bộ rất nhiều trong những năm gần đây.
+
+6
+00:00:19,000 --> 00:00:21,500
+Hãy cùng khám phá những ứng dụng thực tế.
+
+7
+00:00:22,500 --> 00:00:26,000
+Từ dịch tự động đến tổng hợp giọng nói, khả năng là vô tận.
+
+8
+00:00:27,000 --> 00:00:30,500
+Việc lồng tiếng tự động sẽ giúp nội dung tiếp cận được nhiều người hơn.
+
+9
+00:00:31,000 --> 00:00:34,200
+Cảm ơn các bạn đã theo dõi. Hẹn gặp lại trong tập tiếp theo.
+
+10
+00:00:35,000 --> 00:00:37,500
+Đừng quên đăng ký kênh để cập nhật những video mới nhất.
