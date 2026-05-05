@@ -96,9 +96,13 @@ class PipelineRunner:
         if not reference_audio_path.exists():
             raise PipelineError(f"Reference audio not found: {reference_audio_path}")
 
-        # Setup output directory
+        # Setup output directory.
+        # Sanitize stem to ASCII-safe — Windows passes paths to subprocesses
+        # like rubberband via cp1252 which mangles characters like 【】 to '?'.
+        import re as _re
+        safe_stem = _re.sub(r"[^A-Za-z0-9._-]+", "_", video_path.stem).strip("_") or "video"
         if output_path is None:
-            output_dir = Path(self.config.output_dir) / video_path.stem
+            output_dir = Path(self.config.output_dir) / safe_stem
         else:
             output_dir = Path(output_path).parent
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -278,7 +282,7 @@ class PipelineRunner:
 
             # === Step 5: SRT Generation ===
             self._update_progress("srt_generation")
-            srt_path = output_dir / f"{video_path.stem}_vi.srt"
+            srt_path = output_dir / f"{safe_stem}_vi.srt"
             srt_builder.save(srt_path)
             results["srt_path"] = str(srt_path)
 
@@ -351,7 +355,7 @@ class PipelineRunner:
             )
 
             # Final render
-            final_output = output_path or output_dir / f"{video_path.stem}_dubbed.mp4"
+            final_output = output_path or output_dir / f"{safe_stem}_dubbed.mp4"
             renderer.render_final_video(
                 video_path=video_path,
                 dubbed_audio_path=merged_audio_path,
