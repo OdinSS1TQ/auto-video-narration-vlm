@@ -36,6 +36,8 @@ class TimeStretcher:
                 [self.rubberband_path, "--version"],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
             )
             logger.debug(f"Rubberband available: {result.stdout.strip()}")
         except FileNotFoundError:
@@ -97,7 +99,7 @@ class TimeStretcher:
             f"(ratio={ratio:.3f})"
         )
 
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
         if result.returncode != 0:
             raise RuntimeError(f"Rubberband failed: {result.stderr}")
 
@@ -108,6 +110,7 @@ class TimeStretcher:
         audio_path: str | Path,
         target_duration: float,
         tolerance: float = 0.1,
+        output_dir: Optional[str | Path] = None,
     ) -> tuple[Path, str]:
         """
         Stretch audio to fit a target duration, choosing the best strategy.
@@ -116,6 +119,9 @@ class TimeStretcher:
             audio_path: Input audio file path.
             target_duration: Target duration in seconds.
             tolerance: Acceptable duration difference in seconds.
+            output_dir: Directory for stretched output. Defaults to input file's
+                parent (legacy behavior). Pass an explicit dir to keep input dir
+                clean.
 
         Returns:
             Tuple of (output_path, strategy_used).
@@ -128,11 +134,14 @@ class TimeStretcher:
         if abs(delta) <= tolerance:
             return Path(audio_path), "exact"
 
-        # Create temp output
         suffix = Path(audio_path).suffix
-        output_path = Path(audio_path).with_name(
-            f"{Path(audio_path).stem}_stretched{suffix}"
-        )
+        stem = Path(audio_path).stem
+        if output_dir is not None:
+            output_dir = Path(output_dir)
+            output_dir.mkdir(parents=True, exist_ok=True)
+            output_path = output_dir / f"{stem}_stretched{suffix}"
+        else:
+            output_path = Path(audio_path).with_name(f"{stem}_stretched{suffix}")
 
         if 0.5 <= target_duration / current_duration <= 2.0:
             # Within acceptable stretch range

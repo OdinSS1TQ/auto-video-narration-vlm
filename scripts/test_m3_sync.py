@@ -33,7 +33,11 @@ from src.m3_sync.time_stretcher import TimeStretcher
 def load_segments(srt_path: Path, audio_dir: Path) -> list[dict]:
     """Pair SRT entries with audio chunk files by ordinal index."""
     entries = SRTBuilder.load_srt(srt_path)
-    audio_files = sorted(audio_dir.glob("chunk_*.wav"))
+    # Match raw chunk files only — exclude any *_stretched.wav from prior runs
+    # and any other suffixed variants.
+    audio_files = sorted(
+        p for p in audio_dir.glob("chunk_[0-9]*.wav") if "_stretched" not in p.stem
+    )
 
     if len(entries) != len(audio_files):
         raise RuntimeError(

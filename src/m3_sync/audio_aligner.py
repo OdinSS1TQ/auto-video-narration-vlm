@@ -113,11 +113,11 @@ class AudioAligner:
                 logger.debug(f"Segment {i}: exact match (no adjustment needed)")
 
             elif strategy in ("stretch_compress", "stretch_expand"):
-                aligned_path = output_dir / f"aligned_{i:04d}.wav"
                 output, method = self.time_stretcher.stretch_to_fit(
                     audio_path=audio_path,
                     target_duration=target_duration,
                     tolerance=self.tolerance_sec,
+                    output_dir=output_dir,
                 )
                 result = segment.copy()
                 result["aligned_audio_path"] = str(output)
