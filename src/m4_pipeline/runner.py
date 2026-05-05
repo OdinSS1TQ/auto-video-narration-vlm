@@ -220,19 +220,49 @@ class PipelineRunner:
                 if cleaned.endswith("```"):
                     cleaned = cleaned[:-3]
 
+                # Save raw response for diagnostics (every chunk, every run).
+                raw_dump = work_dir / f"chunk_{chunk_idx:02d}_raw_response.txt"
+                raw_dump.write_text(raw_response, encoding="utf-8")
+
                 try:
-                    entries = _json.loads(cleaned.strip())
+                    parsed = _json.loads(cleaned.strip())
                 except _json.JSONDecodeError as exc:
                     logger.warning(
                         f"Chunk {chunk_idx}: VLM response not valid JSON ({exc}); "
-                        f"raw response saved to debug log"
+                        f"raw saved to {raw_dump}"
                     )
-                    logger.debug(f"Raw VLM response for chunk {chunk_idx}:\n{raw_response}")
                     continue
 
-                if not isinstance(entries, list):
+                # Accept either:
+                #   - JSON array of entries (preferred per prompt)
+                #   - JSON object wrapping the array under any key
+                #   - Single JSON object that IS one entry (wrap in list)
+                if isinstance(parsed, list):
+                    entries = parsed
+                elif isinstance(parsed, dict):
+                    list_values = [v for v in parsed.values() if isinstance(v, list)]
+                    if list_values:
+                        entries = list_values[0]
+                        logger.info(
+                            f"Chunk {chunk_idx}: VLM returned dict; extracted list "
+                            f"from key value (raw saved to {raw_dump})"
+                        )
+                    elif {"start_time", "end_time", "translated_text"} <= set(parsed.keys()):
+                        entries = [parsed]
+                        logger.info(
+                            f"Chunk {chunk_idx}: VLM returned single entry as dict; "
+                            f"wrapped in list (raw saved to {raw_dump})"
+                        )
+                    else:
+                        logger.warning(
+                            f"Chunk {chunk_idx}: VLM returned dict with no usable list "
+                            f"or entry shape; raw saved to {raw_dump}"
+                        )
+                        continue
+                else:
                     logger.warning(
-                        f"Chunk {chunk_idx}: VLM returned non-list ({type(entries).__name__}); skipping"
+                        f"Chunk {chunk_idx}: VLM returned {type(parsed).__name__}; "
+                        f"raw saved to {raw_dump}"
                     )
                     continue
 
