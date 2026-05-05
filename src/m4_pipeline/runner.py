@@ -142,7 +142,9 @@ class PipelineRunner:
                 mode=self.config.vlm_mode,
                 model_name=self.config.vlm_model_name,
                 api_key=self.config.gemini_api_key,
+                local_model_path=self.config.qwen_model_path,
                 temperature=self.config.vlm_temperature,
+                max_tokens=self.config.vlm_max_tokens,
             )
             prompt_chain = PromptChain()
             context_window = ContextWindow()
@@ -180,6 +182,17 @@ class PipelineRunner:
             srt_path = output_dir / f"{video_path.stem}_vi.srt"
             srt_builder.save(srt_path)
             results["srt_path"] = str(srt_path)
+
+            # Free VLM VRAM before loading TTS — both don't fit on 8 GB GPUs.
+            try:
+                vlm_client.unload_model()
+            except Exception as exc:
+                logger.warning(f"VLM unload failed (continuing): {exc}")
+            try:
+                import torch
+                torch.cuda.empty_cache()
+            except Exception:
+                pass
 
             # === Step 6: Voice Cloning (VieNeu-TTS v2 Turbo) ===
             self._update_progress("voice_cloning")
