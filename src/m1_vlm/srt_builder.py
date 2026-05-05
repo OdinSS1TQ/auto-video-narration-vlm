@@ -59,21 +59,23 @@ class SRTBuilder:
 
         return "\n".join(lines)
 
-    def deduplicate_entries(self, overlap_tolerance: float = 0.5):
+    def deduplicate_entries(self, overlap_tolerance: float = 0.5, text_similarity: float = 0.85):
         """
         Remove duplicate/overlapping entries after merging chunks.
 
-        When chunks overlap (e.g. 5s overlap), both chunks may generate
-        subtitles for the overlapping region. This method keeps only the
-        entries from the earlier chunk and removes duplicates.
+        Uses TWO strategies:
+        1. Time-based: Remove entries that overlap temporally
+        2. Text-based: Remove entries with identical or similar translated_text
 
         Args:
-            overlap_tolerance: Time tolerance in seconds for detecting overlaps.
-                               Entries starting within this window of each other
-                               are considered duplicates.
+            overlap_tolerance: Time tolerance in seconds for detecting time overlaps.
+            text_similarity: Threshold (0-1) for text similarity detection.
+                             Entries with similarity > threshold are considered duplicates.
         """
         if len(self._entries) < 2:
             return
+
+        from difflib import SequenceMatcher
 
         # Sort by start time
         sorted_entries = sorted(
@@ -87,9 +89,30 @@ class SRTBuilder:
             prev_end = self._timestamp_to_seconds(prev["end_time"])
             curr_start = self._timestamp_to_seconds(entry["start_time"])
 
-            # Skip if this entry overlaps significantly with the previous one
-            # This catches duplicates from chunk overlap regions
+            # Strategy 1: Skip if this entry overlaps significantly in TIME
             if curr_start < prev_end - overlap_tolerance:
+                continue
+
+            # Strategy 2: Skip if translated_text is identical or very similar
+            # to ANY previously added entry (not just the previous one)
+            curr_text = entry.get("translated_text", "").strip()
+            is_text_duplicate = False
+            if curr_text:
+                for existing in deduped:
+                    existing_text = existing.get("translated_text", "").strip()
+                    if not existing_text:
+                        continue
+                    # Exact match
+                    if curr_text == existing_text:
+                        is_text_duplicate = True
+                        break
+                    # Fuzzy match
+                    ratio = SequenceMatcher(None, curr_text, existing_text).ratio()
+                    if ratio >= text_similarity:
+                        is_text_duplicate = True
+                        break
+
+            if is_text_duplicate:
                 continue
 
             deduped.append(entry)
@@ -99,7 +122,7 @@ class SRTBuilder:
             from loguru import logger as _logger
             _logger.info(
                 f"Deduplicated: {len(self._entries)} → {len(deduped)} "
-                f"entries ({removed} overlapping entries removed)"
+                f"entries ({removed} duplicate entries removed)"
             )
 
         self._entries = deduped

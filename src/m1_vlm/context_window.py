@@ -105,6 +105,9 @@ class ContextWindow:
         """
         Get a summary of recent context for the next chunk.
 
+        Enhanced: Shows ALL entries from previous chunks so the VLM knows
+        exactly what has already been generated and must NOT repeat.
+
         Returns:
             Formatted context string for prompt injection.
         """
@@ -117,16 +120,18 @@ class ContextWindow:
             summary = chunk_data.get("summary", "")
             entries = chunk_data["entries"]
 
-            part = f"[Chunk {chunk_idx}]"
+            part = f"[Chunk {chunk_idx} — ALREADY GENERATED, DO NOT REPEAT]"
             if summary:
                 part += f" {summary}"
 
-            # Add last few translations
-            for entry in entries[-3:]:
+            # Show ALL entries so VLM can see exactly what was generated
+            for entry in entries:
                 original = entry.get("original_text", "")
                 translated = entry.get("translated_text", "")
+                st = entry.get("start_time", "")
+                et = entry.get("end_time", "")
                 if original and translated:
-                    part += f"\n  '{original}' → '{translated}'"
+                    part += f"\n  [{st}→{et}] '{original}' → '{translated}'"
 
             parts.append(part)
 

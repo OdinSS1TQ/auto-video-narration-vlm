@@ -53,7 +53,7 @@ class PipelineConfig:
     # === Local Model Paths ===
     @property
     def qwen_model_path(self) -> str:
-        return os.getenv("QWEN_MODEL_PATH", "./models/qwen2-vl-7b-q4")
+        return os.getenv("QWEN_MODEL_PATH", "./models/qwen3.5-2b")
 
     @property
     def glm_ocr_model_path(self) -> str:
@@ -66,15 +66,42 @@ class PipelineConfig:
     # === TTS Settings ===
     @property
     def tts_engine(self) -> str:
-        return os.getenv("TTS_ENGINE", "f5-tts")
+        return os.getenv("TTS_ENGINE", "vieneu")
 
     @property
     def tts_sample_rate(self) -> int:
-        return int(os.getenv("TTS_SAMPLE_RATE", "22050"))
+        return int(os.getenv("TTS_SAMPLE_RATE", "24000"))  # VieNeu native: 24 kHz
 
     @property
     def tts_speed(self) -> float:
         return float(os.getenv("TTS_SPEED", "1.0"))
+
+    # --- VieNeu-TTS v2 Turbo specific ---
+    @property
+    def tts_backbone_repo(self) -> str:
+        """HuggingFace repo for VieNeu backbone LLM."""
+        return os.getenv("TTS_BACKBONE_REPO", "pnnbao-ump/VieNeu-TTS-v2-Turbo")
+
+    @property
+    def tts_backbone_device(self) -> str:
+        """Device for backbone LLM inference ('cuda' or 'cpu')."""
+        return os.getenv("TTS_BACKBONE_DEVICE", "cuda")
+
+    @property
+    def tts_codec_device(self) -> str:
+        """Device for NeuCodec decoder ('cuda' or 'cpu')."""
+        return os.getenv("TTS_CODEC_DEVICE", "cuda")
+
+    @property
+    def tts_vieneu_mode(self) -> str:
+        """Vieneu() factory mode: 'standard' | 'fast' | 'remote'."""
+        return os.getenv("TTS_VIENEU_MODE", "standard")
+
+    @property
+    def tts_hf_token(self) -> Optional[str]:
+        """HuggingFace token for private/gated model repos (None if unset)."""
+        token = os.getenv("TTS_HF_TOKEN", "")
+        return token if token else None
 
     # === Processing ===
     @property

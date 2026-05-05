@@ -12,7 +12,7 @@ from typing import Any, Callable, Dict, List, Optional
 from loguru import logger
 
 from src.m4_pipeline.config import PipelineConfig
-from src.m4_pipeline.exceptions import PipelineError, StepError
+from src.m4_pipeline.exceptions import PipelineError
 from src.m1_vlm.scene_detector import SceneDetector
 from src.m1_vlm.frame_extractor import FrameExtractor
 from src.m1_vlm.prompt_chain import PromptChain
@@ -21,7 +21,7 @@ from src.m1_vlm.validator import SubtitleValidator
 from src.m1_vlm.srt_builder import SRTBuilder
 from src.m1_vlm.context_window import ContextWindow
 from src.m2_tts.tts_client import TTSClient
-from src.m2_tts.speaker_encoder import SpeakerEncoder
+from src.m2_tts.speaker_encoder import SpeakerEncoder  # reserved: m5_evaluation MOS scoring
 from src.m2_tts.batch_inference import BatchInference
 from src.m3_sync.audio_aligner import AudioAligner
 from src.m3_sync.ffmpeg_renderer import FFmpegRenderer
@@ -181,15 +181,26 @@ class PipelineRunner:
             srt_builder.save(srt_path)
             results["srt_path"] = str(srt_path)
 
-            # === Step 6: Voice Cloning ===
+            # === Step 6: Voice Cloning (VieNeu-TTS v2 Turbo) ===
             self._update_progress("voice_cloning")
-            speaker_encoder = SpeakerEncoder()
-            embedding = speaker_encoder.extract_embedding(reference_audio_path)
 
+            # Initialize TTSClient with VieNeu-TTS v2 Turbo
+            # Models are auto-downloaded from HuggingFace on first run.
             tts_client = TTSClient(
                 engine=self.config.tts_engine,
-                model_path=self.config.tts_model_path,
+                backbone_repo=self.config.tts_backbone_repo,
+                backbone_device=self.config.tts_backbone_device,
+                codec_device=self.config.tts_codec_device,
+                vieneu_mode=self.config.tts_vieneu_mode,
+                hf_token=self.config.tts_hf_token,
+                sample_rate=self.config.tts_sample_rate,
             )
+
+            # Encode reference audio ONCE — ref_codes are reused for all segments.
+            # VieNeu v2 Turbo: no ref_text required (truly zero-shot).
+            logger.info(f"Encoding reference voice: {reference_audio_path.name}")
+            ref_codes = tts_client.encode_reference(reference_audio_path, use_cache=True)
+
             batch_inference = BatchInference(tts_client)
 
             # Load SRT entries for TTS
@@ -197,8 +208,8 @@ class PipelineRunner:
             audio_segments = await batch_inference.process_all(
                 segments=srt_entries,
                 output_dir=work_dir / "audio_chunks",
-                speaker_embedding=embedding,
-                reference_audio=str(reference_audio_path),
+                ref_codes=ref_codes,   # pre-encoded, reused across all segments
+                ref_text=None,         # v2 Turbo: zero-shot, no transcript needed
             )
 
             # === Step 7: Audio Alignment ===

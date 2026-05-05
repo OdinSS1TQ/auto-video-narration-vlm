@@ -279,6 +279,11 @@ Return ONLY a JSON array:
         context_summary: Optional[str] = None,
         previous_translations: Optional[str] = None,
         global_context: Optional[str] = None,
+        frame_timestamps: Optional[List[float]] = None,
+        chunk_start: float = 0.0,
+        chunk_end: float = 0.0,
+        chunk_index: int = 0,
+        total_chunks: int = 1,
     ) -> str:
         """
         All-in-one prompt: Extract + Translate + SRT in a single VLM call.
@@ -294,73 +299,124 @@ Return ONLY a JSON array:
             - Terminology consistency (VLM knows all key terms upfront)
             - Section awareness (VLM knows where this chunk fits in the video)
             - Narration flow (avoids redundant introductions)
+
+        Key Anti-Hallucination Design:
+            - Frame timestamps are EXPLICITLY listed so VLM must map output to real frames
+            - Per-frame description is REQUIRED before generating narration
+            - Strict instruction to ONLY describe visible content, never invent
         """
-        prompt = f"""You are an expert video tutorial analyst and {self.source_lang} to {self.target_lang} subtitle translator.
+        prompt = f"""You are an expert video analyst and {self.source_lang} to {self.target_lang} subtitle translator.
 
 ## Task
-Analyze the provided video frames and create {self.target_lang} narration subtitles:
-1. **Observe** the screen to understand CONTEXT (what action is being performed)
-2. **Write narration**: Describe what is happening as a step-by-step tutorial script — do NOT copy on-screen text literally
-3. **Translate** the narration to natural {self.target_lang} for voiceover dubbing
-4. **Format** as SRT subtitles with accurate timestamps
+You are given {len(frame_timestamps) if frame_timestamps else 'several'} frames from a video segment (Chunk {chunk_index + 1}/{total_chunks}, from {chunk_start:.1f}s to {chunk_end:.1f}s).
 
-## Narration Rules
-- Write what a narrator would SAY to explain each step
-- Use the screen content as CONTEXT, not as text to transcribe
-- Example: Screen shows `git clone ...` → Narration: "First, we clone the repository"
-- Example: Screen shows a dashboard → Narration: "Here we can see the project dashboard"
-- Keep each subtitle focused on ONE action or step
+Create {self.target_lang} narration subtitles that provide a HIGH-LEVEL overview:
+1. **Look at the frames** — understand the general topic/section being shown
+2. **Write overview narration** — describe WHAT this section is about at a high level, NOT what buttons/menus are being clicked
+3. **Translate** to natural {self.target_lang} for voiceover
+4. **Assign timestamps** — use the frame timestamps below as anchor points
+"""
+
+        # ── Frame timestamp anchoring (critical for anti-hallucination) ──
+        if frame_timestamps:
+            prompt += f"""
+## Frame Timestamps (ABSOLUTE — relative to video start)
+You are given exactly {len(frame_timestamps)} frames at these timestamps:
+"""
+            for i, ts in enumerate(frame_timestamps):
+                prompt += f"  - Frame {i + 1}: {ts:.1f}s\n"
+
+            prompt += f"""
+CRITICAL RULES for timestamps:
+- Your subtitle timestamps MUST fall within [{chunk_start:.1f}s, {chunk_end:.1f}s]
+- Use the frame timestamps above as ANCHOR POINTS for your subtitles
+- Each subtitle's start_time should be near a frame timestamp
+- Generate timestamps in ABSOLUTE time (relative to video start, NOT relative to chunk start)
+- You MUST generate subtitles that span the FULL duration of this chunk, not just the first few seconds
+- If a frame shows the same screen as the previous frame, it may mean the narrator is still explaining — extend the previous subtitle or describe what changed
+"""
+
+        # ── Narration rules ──
+        prompt += f"""
+## Language Strategy
+- Use English for Phase A (observation) — describe UI elements and actions in English
+- Use Vietnamese for Phase B (script writing) — write the voiceover in natural Vietnamese
+- In the output JSON: original_text = English observation, translated_text = Vietnamese voiceover
+
+## Narration Rules — HIGH-LEVEL OVERVIEW ONLY
+- Write a GENERAL OVERVIEW of what this section of the video is about
+- Do NOT describe specific UI actions in detail (e.g., "click this button", "navigate to this menu")
+- Instead, describe the PURPOSE or TOPIC of what's being shown
+- Examples of what TO DO:
+  ✓ "Phần này giới thiệu về tính năng quản lý tài liệu" (This section introduces the document management feature)
+  ✓ "Tiếp theo, chúng ta tìm hiểu cách hệ thống xử lý câu hỏi" (Next, we learn how the system handles questions)
+  ✓ "Ở đây, hệ thống đang thực hiện việc chuyển đổi dữ liệu" (Here, the system is performing data conversion)
+- Examples of what NOT to do:
+  ✗ "Người dùng nhấn vào nút Submit ở góc trên bên phải" (User clicks Submit button in top-right corner)
+  ✗ "Màn hình hiển thị một form với 3 trường nhập liệu" (Screen shows a form with 3 input fields)
+- Keep narration concise — 1-2 sentences per subtitle
+- Write as a CONTINUOUS narrative with natural flow between sections
+- Use connecting words: "Tiếp theo" (Next), "Sau đó" (Then), "Bây giờ" (Now), "Ở đây" (Here)
+
+## Anti-Hallucination Rules
+- ONLY describe topics you can ACTUALLY SEE in the frames
+- Do NOT invent welcome messages, introductions, or conclusions that aren't visible
+- If frames show similar content, create fewer subtitles rather than inventing content
 
 ## Translation Rules
-- Technical terms: Keep in English (API, database, deploy, etc.)
-- Use conversational {self.target_lang}, like explaining to a student
-- Numbers in speech: Translate naturally
+- Technical terms: Keep in {self.source_lang} (API, database, deploy, etc.)
+- Use conversational {self.target_lang}, professional spoken style
+- Make it sound like a narrator giving an overview, not reading a manual
 
 ## SRT Constraints
 - No overlapping subtitles (min 0.1s gap)
-- Duration: 1s — 7s per subtitle
+- Duration: 2s — 7s per subtitle
 - Max 2 lines, max 42 characters per line
 - Reading speed: max 25 characters per second
-- If too long, split into multiple entries
 """
 
-        # Global context: video-level overview from Pass 0
-        # This is the key architectural improvement — each chunk now "knows"
-        # the full video structure before processing its local content
+        # ── Global context ──
         if global_context:
             prompt += f"\n## Video Overview (Full Video Context)\n{global_context}\n"
 
         if chunk_info:
-            prompt += f"\n## Video Chunk\n{chunk_info}\n"
-            prompt += (
-                "IMPORTANT: Generate subtitles ONLY for the time range of this chunk. "
-                "Your timestamps must start from 00:00:00 relative to this chunk's start. "
-                "Do NOT repeat or regenerate content from earlier parts of the video.\n"
-            )
+            prompt += f"\n## Video Chunk Info\n{chunk_info}\n"
 
+        # ── Anti-repeat context ──
         if context_summary:
-            prompt += f"\n## Context from Previous Chunks\n{context_summary}\n"
+            prompt += f"\n## Previously Generated Content (DO NOT REPEAT)\n{context_summary}\n"
+            prompt += "IMPORTANT: Do NOT regenerate any of the above entries. Continue the narration from where it left off.\n"
 
         if previous_translations:
-            prompt += f"\n## Previous Translations (for consistency)\n```\n{previous_translations}\n```\n"
+            prompt += f"\n## Previous Translations (for style consistency, DO NOT REPEAT)\n```\n{previous_translations}\n```\n"
 
         prompt += f"""
 ## Required JSON Output
+Return ONLY a JSON array with subtitles for THIS chunk. Timestamps must be ABSOLUTE (relative to video start).
 ```json
 [
   {{
     "index": 1,
-    "start_time": "00:00:01,000",
-    "end_time": "00:00:03,500",
-    "original_text": "Hello and welcome to this tutorial",
-    "translated_text": "Xin chào và chào mừng đến với hướng dẫn này"
+    "start_time": "{self._format_timestamp(chunk_start + 1.0)}",
+    "end_time": "{self._format_timestamp(chunk_start + 4.0)}",
+    "original_text": "Description of what is happening on screen",
+    "translated_text": "Mô tả bằng tiếng Việt về những gì đang diễn ra"
   }}
 ]
 ```
 
-Return ONLY the JSON array. No markdown, no explanation.
+Return ONLY the JSON array. No markdown code fences, no explanation.
 """
         return prompt
+
+    @staticmethod
+    def _format_timestamp(seconds: float) -> str:
+        """Format seconds as SRT timestamp HH:MM:SS,mmm."""
+        h = int(seconds // 3600)
+        m = int((seconds % 3600) // 60)
+        s = int(seconds % 60)
+        ms = int((seconds % 1) * 1000)
+        return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
 
     # ─────────────────────────────────────────────────────────────────
     # Legacy compatibility
