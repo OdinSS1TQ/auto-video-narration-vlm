@@ -180,6 +180,64 @@ class PipelineRunner:
             srt_builder = SRTBuilder()
 
             import json as _json
+
+            # --- Global Summary Pass (Pass 0) ---
+            # Without this, the per-chunk prompt has no `global_context`, and
+            # Qwen3.5 tends to return a single-dict entry instead of the JSON
+            # array the prompt asks for — yielding a 1-entry SRT.
+            # Mirrors scripts/run_vlm_extract.py:215-307.
+            global_frames_n = int(getattr(self.config, "global_summary_frames", 15) or 15)
+            try:
+                global_frames = frame_extractor.extract_frames_evenly(
+                    video_path, n=global_frames_n
+                )
+            except Exception as exc:
+                logger.warning(f"Global summary frame extraction failed: {exc}")
+                global_frames = []
+
+            if global_frames:
+                global_b64 = frame_extractor.frames_to_base64_batch(global_frames)
+                # Cap to max_frames so we don't OOM the VLM context.
+                if len(global_b64) > max_frames:
+                    step = len(global_b64) / max_frames
+                    global_b64 = [global_b64[int(j * step)] for j in range(max_frames)]
+
+                global_prompt = prompt_chain.build_global_summary_prompt()
+                raw_global = await vlm_client.generate(
+                    prompt=global_prompt, images_base64=global_b64
+                )
+
+                (work_dir / "global_summary_raw.txt").write_text(
+                    raw_global, encoding="utf-8"
+                )
+
+                cleaned_g = raw_global.strip()
+                if cleaned_g.startswith("```json"):
+                    cleaned_g = cleaned_g[7:]
+                if cleaned_g.startswith("```"):
+                    cleaned_g = cleaned_g[3:]
+                if cleaned_g.endswith("```"):
+                    cleaned_g = cleaned_g[:-3]
+
+                try:
+                    parsed_g = _json.loads(cleaned_g.strip())
+                    pretty_g = _json.dumps(parsed_g, indent=2, ensure_ascii=False)
+                    (work_dir / "global_summary.json").write_text(
+                        pretty_g, encoding="utf-8"
+                    )
+                    context_window.set_global_summary(pretty_g)
+                    logger.info(
+                        f"Global summary: topic='{parsed_g.get('topic', 'N/A')}', "
+                        f"sections={len(parsed_g.get('sections', []))}"
+                    )
+                except _json.JSONDecodeError as exc:
+                    logger.warning(
+                        f"Global summary JSON parse failed ({exc}); using raw text"
+                    )
+                    context_window.set_global_summary(raw_global)
+            else:
+                logger.warning("Global summary skipped: no frames extracted")
+
             for chunk_idx, (start, end) in enumerate(chunks):
                 frames = all_frames.get(chunk_idx, [])
                 if not frames:
