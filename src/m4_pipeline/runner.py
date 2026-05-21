@@ -21,6 +21,7 @@ from src.m1_vlm.vlm_client import VLMClient
 from src.m1_vlm.validator import SubtitleValidator
 from src.m1_vlm.srt_builder import SRTBuilder
 from src.m1_vlm.context_window import ContextWindow
+from src.m1_vlm.entry_retimer import EntryRetimer
 from src.m2_tts.tts_client import TTSClient
 from src.m2_tts.speaker_encoder import SpeakerEncoder  # reserved: m5_evaluation MOS scoring
 from src.m2_tts.batch_inference import BatchInference
@@ -178,6 +179,11 @@ class PipelineRunner:
             context_window = ContextWindow()
             validator = SubtitleValidator()
             srt_builder = SRTBuilder()
+            entry_retimer = EntryRetimer(
+                chars_per_sec=self.config.vi_chars_per_sec,
+                fill_ratio=self.config.chunk_fill_ratio,
+                min_gap_sec=self.config.m3_min_gap_sec,
+            )
 
             import json as _json
 
@@ -328,15 +334,26 @@ class PipelineRunner:
                     )
                     continue
 
-                valid, issues = validator.validate_sequence(entries)
+                retimed = entry_retimer.retime(
+                    entries=entries,
+                    chunk_start=start,
+                    chunk_end=end,
+                    frame_timestamps=timestamps,
+                )
+                logger.info(
+                    f"Chunk {chunk_idx}: parsed {len(entries)} entries; "
+                    f"retimer rewrote starts (first={retimed[0]['start_time']}, "
+                    f"last_end={retimed[-1]['end_time']})"
+                )
+
+                valid, issues = validator.validate_sequence(retimed)
                 if not valid:
                     logger.debug(f"Chunk {chunk_idx}: validation issues fixed: {issues}")
-                    entries = validator.fix_overlaps(entries)
-                    entries = validator.reindex(entries)
+                    retimed = validator.fix_overlaps(retimed)
+                    retimed = validator.reindex(retimed)
 
-                srt_builder.add_entries(entries, chunk_offset=0.0)
-                context_window.add_chunk_result(chunk_idx, entries)
-                logger.info(f"Chunk {chunk_idx}: parsed {len(entries)} subtitle entries")
+                srt_builder.add_entries(retimed, chunk_offset=0.0)
+                context_window.add_chunk_result(chunk_idx, retimed)
 
             # === Step 5: SRT Generation ===
             self._update_progress("srt_generation")
@@ -388,7 +405,10 @@ class PipelineRunner:
 
             # === Step 7: Audio Alignment ===
             self._update_progress("audio_alignment")
-            aligner = AudioAligner()
+            aligner = AudioAligner(
+                max_speedup=self.config.m3_max_speedup,
+                min_gap_sec=self.config.m3_min_gap_sec,
+            )
             segments_with_deltas = aligner.calculate_deltas(audio_segments)
             aligned_segments = aligner.align_all(
                 segments_with_deltas,

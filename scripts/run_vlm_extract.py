@@ -538,6 +538,16 @@ def main():
     print(f"\n▶ Step 6: Building SRT file...")
     from src.m1_vlm.validator import SubtitleValidator
     from src.m1_vlm.srt_builder import SRTBuilder
+    from src.m1_vlm.entry_retimer import EntryRetimer
+
+    # EntryRetimer reads its knobs from the same env vars PipelineConfig uses,
+    # so standalone and end-to-end share thresholds.
+    import os as _os
+    retimer = EntryRetimer(
+        chars_per_sec=float(_os.getenv("M1_VI_CHARS_PER_SEC", "15.0")),
+        fill_ratio=float(_os.getenv("M1_CHUNK_FILL_RATIO", "0.95")),
+        min_gap_sec=float(_os.getenv("M3_MIN_GAP_SEC", "0.1")),
+    )
 
     validator = SubtitleValidator()
     builder = SRTBuilder()
@@ -548,18 +558,29 @@ def main():
         if not entries:
             continue
 
-        # Validate
+        # Retime entries from chunk range + frame anchors (overrides the
+        # VLM-supplied start/end timestamps).
+        chunk_idx_local = result["chunk_index"]
+        cs = float(result["chunk_start"])
+        ce = float(result["chunk_end"])
+        cf = chunk_frames.get(chunk_idx_local, [])
+        ts_anchors = [ts for ts, _, _ in cf]
+        entries = retimer.retime(
+            entries=entries,
+            chunk_start=cs,
+            chunk_end=ce,
+            frame_timestamps=ts_anchors,
+        )
+
+        # Validate after retiming.
         valid, issues = validator.validate_sequence(entries)
         if not valid:
-            print(f"  Chunk {result['chunk_index']}: {len(issues)} validation issues")
+            print(f"  Chunk {chunk_idx_local}: {len(issues)} validation issues")
             for iss in issues[:3]:
                 print(f"    ⚠ {iss}")
-            # Try to fix overlaps
             entries = validator.fix_overlaps(entries)
             entries = validator.reindex(entries)
 
-        # Since prompts now generate ABSOLUTE timestamps,
-        # we do NOT add chunk_offset (timestamps are already correct)
         builder.add_entries(entries, chunk_offset=0.0)
         total_entries += len(entries)
 

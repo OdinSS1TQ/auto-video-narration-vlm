@@ -239,8 +239,24 @@ class SceneDetector:
         """
         scenes = self.detect_scenes(video_path)
         if not scenes:
-            # Fallback: single chunk for entire video
-            return [(0.0, scenes[-1][1] if scenes else 0.0)]
+            # Fallback: single chunk for the entire video. Read duration via
+            # OpenCV — `scenes` is empty here so referencing scenes[-1] would
+            # always be 0.0 (the pre-existing bug this branch had).
+            import cv2
+            cap = cv2.VideoCapture(str(video_path))
+            try:
+                fps = cap.get(cv2.CAP_PROP_FPS) or 0.0
+                frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+                duration = frames / fps if fps > 0 else 0.0
+            finally:
+                cap.release()
+            if duration <= 0:
+                raise ValueError(
+                    f"Could not determine duration for {video_path}; "
+                    f"scene detection returned no scenes and OpenCV reported "
+                    f"fps={fps} frames={frames}"
+                )
+            return [(0.0, duration)]
 
         chunks = []
         current_start = scenes[0][0]

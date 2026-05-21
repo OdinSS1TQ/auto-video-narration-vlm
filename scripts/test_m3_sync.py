@@ -79,8 +79,13 @@ def main():
     logger.info(f"Loaded {len(segments)} segments")
 
     # Stage 1: AudioAligner.calculate_deltas
+    import os as _os
     stretcher = TimeStretcher()
-    aligner = AudioAligner(time_stretcher=stretcher)
+    aligner = AudioAligner(
+        time_stretcher=stretcher,
+        max_speedup=float(_os.getenv("M3_MAX_SPEEDUP", "1.25")),
+        min_gap_sec=float(_os.getenv("M3_MIN_GAP_SEC", "0.1")),
+    )
     with_deltas = aligner.calculate_deltas(segments)
 
     logger.info("=== Per-segment deltas ===")
@@ -110,6 +115,29 @@ def main():
         method_counts[method] = method_counts.get(method, 0) + 1
     for method, n in method_counts.items():
         logger.info(f"  {method}: {n}")
+
+    # Stage 2 report — slip cascade visibility for the standalone validator.
+    stage2_path = args.output_dir / "stage2_alignment.json"
+    stage2_path.write_text(
+        json.dumps(
+            [
+                {
+                    "index": s.get("index"),
+                    "srt_start_sec": s.get("srt_start_sec"),
+                    "effective_start_sec": s.get("effective_start_sec"),
+                    "aligned_duration": s.get("aligned_duration"),
+                    "strategy": s.get("strategy"),
+                    "align_method": s.get("align_method"),
+                    "slip_applied": s.get("slip_applied"),
+                }
+                for s in aligned
+            ],
+            indent=2,
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    logger.info(f"Stage 2 report saved: {stage2_path}")
 
     # Stage 3: FFmpegRenderer.merge_audio_segments
     renderer = FFmpegRenderer()

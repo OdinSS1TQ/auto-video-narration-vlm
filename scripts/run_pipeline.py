@@ -11,6 +11,13 @@ import asyncio
 import sys
 from pathlib import Path
 
+# Force UTF-8 on stdout/stderr so emoji prints (🎬, 🎤, ✅) don't crash on
+# Windows consoles defaulting to cp1252. Must run before any print().
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 

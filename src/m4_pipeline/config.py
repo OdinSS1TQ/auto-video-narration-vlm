@@ -134,6 +134,34 @@ class PipelineConfig:
         0.85 = balanced for tutorial videos."""
         return float(os.getenv("SSIM_THRESHOLD", "0.85"))
 
+    # === M1 Entry Retiming ===
+    @property
+    def vi_chars_per_sec(self) -> float:
+        """Estimated Vietnamese narration speaking rate (chars/sec) used by
+        EntryRetimer to size subtitle slots. Measured ~16.8 char/s on VieNeu
+        Turbo; default 15.0 leaves headroom for slower deliveries."""
+        return float(os.getenv("M1_VI_CHARS_PER_SEC", "15.0"))
+
+    @property
+    def chunk_fill_ratio(self) -> float:
+        """Fraction of each chunk's duration that EntryRetimer fills with
+        subtitle slots. The remainder is reserved for inter-entry gaps and
+        chunk-edge padding."""
+        return float(os.getenv("M1_CHUNK_FILL_RATIO", "0.95"))
+
+    # === M3 Audio Alignment ===
+    @property
+    def m3_max_speedup(self) -> float:
+        """Maximum TTS time-stretch ratio (audio/target) allowed before
+        AudioAligner falls back to slipping the next segment forward."""
+        return float(os.getenv("M3_MAX_SPEEDUP", "1.25"))
+
+    @property
+    def m3_min_gap_sec(self) -> float:
+        """Minimum gap (seconds) between consecutive subtitle entries and
+        between aligned audio segments after slip cascade."""
+        return float(os.getenv("M3_MIN_GAP_SEC", "0.1"))
+
     # === Data Paths ===
     @property
     def output_dir(self) -> str:

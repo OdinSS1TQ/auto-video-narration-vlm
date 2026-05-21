@@ -156,6 +156,58 @@ class TimeStretcher:
             self._truncate_audio(audio_path, output_path, target_duration)
             return output_path, "truncate"
 
+    def stretch_capped(
+        self,
+        audio_path: str | Path,
+        target_duration: float,
+        max_ratio: float,
+        output_dir: str | Path,
+        tol: float = 0.2,
+    ) -> tuple[Path, float, str]:
+        """
+        Stretch toward `target_duration` but never compress more than `max_ratio`
+        (audio_dur / achieved_dur). Pitch is preserved (rubberband).
+
+        Returns:
+            (output_path, achieved_duration, strategy)
+              strategy ∈ {"exact", "compress_fit", "compress_max"}
+
+            - "exact": |audio - target| <= tol; no stretch performed.
+            - "compress_fit": audio > target but within budget; achieved = target.
+            - "compress_max": audio > target * max_ratio; achieved = audio /
+                max_ratio. Caller is responsible for absorbing the residual
+                overflow (achieved - target) downstream (slip cascade).
+
+        This helper does NOT pad or truncate. Use existing `stretch_to_fit` for
+        the pad/truncate paths when audio is shorter than target.
+        """
+        audio_path = Path(audio_path)
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        info = sf.info(str(audio_path))
+        current = info.duration
+        delta = current - target_duration
+
+        if abs(delta) <= tol or current <= target_duration:
+            # Within tolerance OR audio already shorter than target — leave
+            # alone; the audio fits without compression.
+            return audio_path, current, "exact"
+
+        ratio_needed = current / target_duration  # > 1 since current > target
+        if ratio_needed <= max_ratio:
+            achieved = target_duration
+            strategy = "compress_fit"
+        else:
+            achieved = current / max_ratio
+            strategy = "compress_max"
+
+        suffix = audio_path.suffix
+        stem = audio_path.stem
+        out_path = output_dir / f"{stem}_stretched{suffix}"
+        self.stretch(audio_path, out_path, achieved)
+        return out_path, achieved, strategy
+
     def _pad_audio(
         self,
         input_path: str | Path,
