@@ -8,6 +8,7 @@ Usage:
 
 import argparse
 import asyncio
+import os
 import sys
 from pathlib import Path
 
@@ -52,6 +53,14 @@ def parse_args():
         help="VLM mode override",
     )
     parser.add_argument(
+        "--mode",
+        choices=["vlm", "ocr"],
+        default=None,
+        help="Pipeline mode: 'vlm' (default, today's behavior) or 'ocr' "
+             "(GLM-OCR caption timing + VLM translation). "
+             "If omitted, uses PIPELINE_MODE env var (default 'vlm').",
+    )
+    parser.add_argument(
         "--tts-engine",
         choices=["f5-tts", "vixtts"],
         default=None,
@@ -80,11 +89,11 @@ async def main():
 
     # Override config with CLI args
     if args.vlm_mode:
-        import os
         os.environ["VLM_MODE"] = args.vlm_mode
     if args.tts_engine:
-        import os
         os.environ["TTS_ENGINE"] = args.tts_engine
+    if args.mode is not None:
+        os.environ["PIPELINE_MODE"] = args.mode
 
     runner = PipelineRunner(config)
 

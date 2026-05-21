@@ -134,6 +134,48 @@ class PipelineConfig:
         0.85 = balanced for tutorial videos."""
         return float(os.getenv("SSIM_THRESHOLD", "0.85"))
 
+    # === Pipeline Mode (vlm | ocr) ===
+    @property
+    def pipeline_mode(self) -> str:
+        """Pipeline path: 'vlm' (default, today's behavior) or 'ocr'
+        (GLM-OCR reads burned-in captions; VLM only translates)."""
+        return os.getenv("PIPELINE_MODE", "vlm")
+
+    @property
+    def ocr_sample_fps(self) -> float:
+        """Frame sampling rate for caption OCR (frames per second)."""
+        return float(os.getenv("OCR_SAMPLE_FPS", "2.0"))
+
+    @property
+    def caption_band_ratio(self) -> float:
+        """Fraction of frame height (from bottom) sent to GLM-OCR."""
+        return float(os.getenv("CAPTION_BAND_RATIO", "0.10"))
+
+    @property
+    def caption_merge_max_gap_sec(self) -> float:
+        """Merge adjacent OCR segments whose inter-segment gap is at most this."""
+        return float(os.getenv("CAPTION_MERGE_MAX_GAP_SEC", "0.3"))
+
+    @property
+    def caption_merge_max_chars(self) -> int:
+        """Cap on combined English chars when merging adjacent segments."""
+        return int(os.getenv("CAPTION_MERGE_MAX_CHARS", "100"))
+
+    @property
+    def caption_extend_end_sec(self) -> float:
+        """Extend each entry's end_time by up to this many seconds (capped by next start)."""
+        return float(os.getenv("CAPTION_EXTEND_END_SEC", "0.5"))
+
+    @property
+    def caption_dedup_ratio(self) -> float:
+        """SequenceMatcher ratio threshold for 'same caption'."""
+        return float(os.getenv("CAPTION_DEDUP_RATIO", "0.85"))
+
+    @property
+    def caption_min_duration_sec(self) -> float:
+        """Drop OCR-derived caption segments shorter than this."""
+        return float(os.getenv("CAPTION_MIN_DURATION_SEC", "0.3"))
+
     # === M1 Entry Retiming ===
     @property
     def vi_chars_per_sec(self) -> float:

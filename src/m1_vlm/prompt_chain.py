@@ -409,6 +409,126 @@ Return ONLY the JSON array. No markdown code fences, no explanation.
 """
         return prompt
 
+    def build_translation_only_prompt(
+        self,
+        en_text: str,
+        chunk_info: Optional[str] = None,
+        global_context: Optional[str] = None,
+        previous_translations: Optional[str] = None,
+    ) -> str:
+        """Translate ONE English caption to Vietnamese voiceover.
+
+        Assumes a single frame image is attached as visual grounding so the
+        translator can disambiguate UI/code references in `en_text`.
+
+        Output: JSON object {"translated_text": "..."}. No timing field.
+        """
+        prompt = f"""You are a professional {self.source_lang}-to-{self.target_lang} translator for technical tutorial voiceover.
+
+## Source caption
+"{en_text}"
+
+## Visual context
+One frame from the video at the moment this caption appeared is attached as an image. Use it to disambiguate any UI labels, code identifiers, or on-screen elements the caption refers to. Do NOT describe the frame; only use it to inform the translation.
+
+## Translation rules
+- Output natural, conversational {self.target_lang} suitable for spoken voiceover.
+- Keep technical terms, code, commands, and UI labels in {self.source_lang} (e.g., "API", "pip install torch", "Submit").
+- Translate numbers and conjunctions naturally.
+- Do not add greetings, introductions, or conclusions that aren't in the source.
+- One sentence in, one sentence out — do not split or merge.
+
+## Continuity (only if "Previous translations" appears below)
+- When a previous translation is provided, this caption is the NEXT line of the same narration. Make the two flow naturally.
+- Begin the translation with a soft Vietnamese connector when it sounds natural — e.g., "Tiếp theo,", "Sau đó,", "Bây giờ,", "Ở đây,", "Tiếp đến,". Do not force a connector if the caption already starts smoothly.
+- Do NOT repeat content already covered by previous translations.
+- Avoid awkward English carryovers — phrase the link as a Vietnamese narrator would speak between two sentences.
+"""
+        if global_context:
+            prompt += f"\n## Video overview\n{global_context}\n"
+        if chunk_info:
+            prompt += f"\n## Chunk info\n{chunk_info}\n"
+        if previous_translations:
+            prompt += (
+                "\n## Previous translations (the line(s) spoken just before this one — keep flow natural)\n"
+                f"{previous_translations}\n"
+            )
+
+        prompt += """
+## Output
+Return ONLY a JSON object with this exact shape, no markdown fences, no explanation.
+Replace <VI_TRANSLATION_HERE> with the actual Vietnamese translation of the source caption above — do NOT copy the placeholder token verbatim.
+```json
+{"translated_text": "<VI_TRANSLATION_HERE>"}
+```
+"""
+        return prompt
+
+    def build_narration_classifier_prompt(self, captions: list[str]) -> str:
+        """Batched classifier: label each caption as 'narration' or 'screen'.
+
+        Used to drop UI/header/footer text that GLM-OCR picks up alongside
+        real narration captions. Returns a prompt that asks for a JSON object:
+            {"labels": ["narration", "screen", ...]}
+        with exactly len(captions) entries in input order.
+        """
+        if not captions:
+            raise ValueError("captions must be non-empty")
+
+        prompt = f"""You are a binary classifier for tutorial-video captions.
+
+Each input below is one line of text extracted from a video frame. Many of these tutorial videos are voiced demos where the narrator READS THE INSTRUCTIONS ALOUD while clicking through the UI — so short imperative phrases like "choose the language" or "upload the file" are almost always NARRATION, not screen-only text.
+
+Decide for each line:
+- "narration": a sentence or instruction a narrator would speak. Includes spoken UI instructions ("choose the language", "click submit", "upload your file", "generate summary"), descriptive sentences, imperative steps. Anything with a verb and natural sentence structure counts.
+- "screen": page chrome a narrator would NEVER speak — copyright footers, brand watermarks alone, version strings, long ALL-CAPS document titles, error toasts, dates, raw numeric IDs.
+
+**Lean toward "narration" when uncertain.** It is much worse to drop spoken content than to keep one extra line.
+
+## Examples
+
+| Text | Label | Why |
+|---|---|---|
+| "click the submit button to send your data" | narration | sentence with action |
+| "choose the language of the meeting" | narration | instruction; narrator says this |
+| "upload the audio or video of a meeting" | narration | instruction; narrator says this |
+| "generate summary" | narration | short, but a spoken step |
+| "the generation time depends on the length of the meeting" | narration | descriptive sentence |
+| "the summary box shows the summary of the meeting" | narration | descriptive sentence |
+| "© 2026 vnext - powered by stt & llm" | screen | static copyright footer |
+| "© 2026 vnext · powered by stt & llm" | screen | static copyright footer |
+| "TOYOBEAUTY - MODULE 5 SALES MEETING MINUTES AUTO CREATION" | screen | long ALL-CAPS title chrome |
+| "USER REGISTRATION" | screen | page header only |
+| "v2.4.1" | screen | version string |
+| "Submit" | screen | bare 1-word button label, no verb context |
+| "marketing marketing marketing" | screen | repeated brand placeholder, no narration shape |
+
+## Captions to classify
+
+There are {len(captions)} captions. Classify each in the order given:
+
+"""
+        for i, c in enumerate(captions, start=1):
+            # Truncate extremely long lines so the prompt fits a small model.
+            safe = c.replace("\n", " ").strip()
+            if len(safe) > 200:
+                safe = safe[:200] + "..."
+            prompt += f'{i}. "{safe}"\n'
+
+        prompt += f"""
+
+## Output
+
+Return ONLY a JSON object with exactly this shape, no markdown fences, no explanation:
+```json
+{{"labels": ["narration", "screen", ...]}}
+```
+
+The `labels` array MUST have exactly {len(captions)} entries, in the same order as the captions above.
+Each entry MUST be the string "narration" or the string "screen". No other values are allowed.
+"""
+        return prompt
+
     @staticmethod
     def _format_timestamp(seconds: float) -> str:
         """Format seconds as SRT timestamp HH:MM:SS,mmm."""

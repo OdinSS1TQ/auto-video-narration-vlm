@@ -194,7 +194,7 @@ class VLMClient:
                 ))
 
         # Add text prompt
-        parts.append(types.Part.from_text(prompt))
+        parts.append(types.Part.from_text(text=prompt))
 
         contents = [types.Content(role="user", parts=parts)]
 
