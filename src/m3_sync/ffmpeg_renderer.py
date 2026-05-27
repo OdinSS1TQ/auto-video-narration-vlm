@@ -89,8 +89,10 @@ class FFmpegRenderer:
         # downstream video render with -shortest truncates the entire video.
         mix_inputs = "".join(f"[a{i}]" for i in range(len(filter_parts)))
         filter_complex = ";".join(filter_parts)
+        # normalize=0 prevents amix from dividing volume by input count —
+        # segments don't overlap so there's no clipping risk.
         filter_complex += (
-            f";{mix_inputs}amix=inputs={len(filter_parts)}:duration=longest[mixed]"
+            f";{mix_inputs}amix=inputs={len(filter_parts)}:duration=longest:normalize=0[mixed]"
             f";[mixed]apad=whole_dur={total_duration}[out]"
         )
 

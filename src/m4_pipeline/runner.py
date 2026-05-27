@@ -262,10 +262,9 @@ class PipelineRunner:
                 f"{len(labels)} segments (dropped {len(labels) - len(segments)} screen-text)"
             )
 
-            if len(segments) < 3:
+            if len(segments) < 1:
                 raise PipelineError(
-                    f"Too few narration segments after classification "
-                    f"({len(segments)}); aborting before translation"
+                    "No narration segments after classification; aborting before translation"
                 )
 
             # === Step 2b: Conservative merge of adjacent narration fragments ===
@@ -389,9 +388,9 @@ class PipelineRunner:
                 })
                 previous_vi.append(vi)
 
-            if len(entries) < 3:
+            if len(entries) < 1:
                 raise PipelineError(
-                    f"Too few segments translated ({len(entries)}); aborting before TTS"
+                    "No segments translated; aborting before TTS"
                 )
 
             # === Step 4: Build SRT ===

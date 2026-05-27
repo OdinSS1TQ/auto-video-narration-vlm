@@ -263,9 +263,8 @@ def iter_video_samples(
 ) -> Iterator[Tuple[float, np.ndarray]]:
     """Yield (timestamp_sec, frame_bgr) at the requested rate.
 
-    Uses VideoCapture seek-by-time (CAP_PROP_POS_MSEC). On videos with VFR
-    timing the actual returned timestamp may drift slightly; that's fine for
-    caption-grain accuracy.
+    Seeks directly to each sample timestamp — only decodes the frames
+    we actually need rather than every frame in the video.
 
     Raises:
         IOError: if the video cannot be opened or has no frames.
@@ -291,7 +290,6 @@ def iter_video_samples(
             cap.set(cv2.CAP_PROP_POS_MSEC, t * 1000.0)
             ok, frame = cap.read()
             if not ok or frame is None:
-                # Couldn't decode at this timestamp — skip but keep advancing.
                 t += step
                 continue
             yield t, frame
@@ -321,11 +319,26 @@ def get_video_duration_sec(video_path: str | Path) -> float:
 from loguru import logger
 
 
+def _dhash(gray: np.ndarray) -> int:
+    """Compute a 64-bit difference hash from a grayscale image.
+
+    Resize to 9x8, compare each pixel to its right neighbor → 64 bits.
+    """
+    small = cv2.resize(gray, (9, 8), interpolation=cv2.INTER_AREA)
+    diff = small[:, 1:] > small[:, :-1]  # 8x8 bool
+    return int(np.packbits(diff.flatten()).view(np.uint64)[0])
+
+
+def _dhash_distance(h1: int, h2: int) -> int:
+    """Hamming distance between two 64-bit hashes."""
+    return bin(h1 ^ h2).count("1")
+
+
 class CaptionTimeline:
     """Build a list of caption segments by densely OCR-ing burned-in subtitles.
 
-    Pipeline: sample @ sample_fps → crop bottom band → GLM-OCR → normalize →
-    group consecutive identical captions → drop short blips.
+    Pipeline: sample @ sample_fps → crop bottom band → dHash skip (if unchanged)
+    → GLM-OCR → normalize → group consecutive identical captions → drop short blips.
     """
 
     def __init__(
@@ -336,6 +349,7 @@ class CaptionTimeline:
         dedup_ratio: float = 0.85,
         min_duration_sec: float = 0.3,
         ocr_prompt: str = "Read the subtitle text only. Return only the text.",
+        dhash_max_distance: int = 6,
     ):
         self.ocr = ocr
         self.sample_fps = sample_fps
@@ -343,6 +357,7 @@ class CaptionTimeline:
         self.dedup_ratio = dedup_ratio
         self.min_duration_sec = min_duration_sec
         self.ocr_prompt = ocr_prompt
+        self.dhash_max_distance = dhash_max_distance
 
     def build(self, video_path: str | Path) -> List[CaptionSegment]:
         """Run the full pipeline and return segments."""
@@ -352,11 +367,25 @@ class CaptionTimeline:
         stream: List[Tuple[float, str, np.ndarray]] = []
         n_samples = 0
         n_failures = 0
-
         n_hallucinations = 0
+        n_skip = 0
+
+        prev_hash: int | None = None
+        prev_text = ""
+
         for t, frame in iter_video_samples(video_path, self.sample_fps):
             n_samples += 1
             crop = crop_bottom_band(frame, self.caption_band_ratio)
+            crop_gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+            h = _dhash(crop_gray)
+
+            if prev_hash is not None and _dhash_distance(prev_hash, h) <= self.dhash_max_distance:
+                n_skip += 1
+                stream.append((t, prev_text, frame))
+                continue
+
+            prev_hash = h
+
             try:
                 raw = self.ocr.extract_text(crop, prompt=self.ocr_prompt)
             except Exception as exc:
@@ -367,12 +396,14 @@ class CaptionTimeline:
                 n_hallucinations += 1
                 raw = ""
             text = normalize_caption_text(raw)
-            # Keep the full frame (not the crop) so VLM gets full visual context.
+            prev_text = text
             stream.append((t, text, frame))
 
         logger.info(
-            f"CaptionTimeline: sampled {n_samples} frames "
-            f"({n_failures} OCR failures, {n_hallucinations} repetition artifacts), "
+            f"CaptionTimeline: sampled {n_samples} frames, "
+            f"OCR called {n_samples - n_skip} "
+            f"(skipped {n_skip} by dHash, max_dist={self.dhash_max_distance}), "
+            f"{n_failures} OCR failures, {n_hallucinations} repetition artifacts, "
             f"duration={duration:.1f}s"
         )
 

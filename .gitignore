@@ -62,3 +62,6 @@ tests/
 
 # === Model ===
 models/
+
+# === Video ===
+*.mp4
