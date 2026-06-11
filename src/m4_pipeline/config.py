@@ -144,7 +144,7 @@ class PipelineConfig:
     @property
     def ocr_sample_fps(self) -> float:
         """Frame sampling rate for caption OCR (frames per second)."""
-        return float(os.getenv("OCR_SAMPLE_FPS", "2.0"))
+        return float(os.getenv("OCR_SAMPLE_FPS", "3.0"))
 
     @property
     def caption_band_ratio(self) -> float:

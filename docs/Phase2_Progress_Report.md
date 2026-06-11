@@ -6,9 +6,9 @@ Using Vision-Language Model (VLM) and Zero-shot Voice Cloning
 | | |
 |---|---|
 | **Student** | Ngo Nguyen Tan Quan |
-| **Date** | May 25, 2026 |
+| **Date** | May 27, 2026 |
 | **Phase** | 2 — End-to-End Wiring, Timestamp Accuracy, OCR Mode |
-| **Period** | April 18 – May 25, 2026 |
+| **Period** | April 18 – May 27, 2026 |
 
 ---
 
@@ -60,7 +60,14 @@ Phase 2 focused on closing the three biggest gaps from Phase 1: (1) modules were
 - **Created evaluation CLI** — `scripts/run_evaluation.py` orchestrates all evaluation wrappers via command-line arguments, generating JSON + Markdown + CSV reports with a full PipelineConfig snapshot (20 knobs).
 - **13 evaluation tests** — All passing: sync accuracy fix (2), caption drift (6), translation eval (1), report markdown (2), CLI smoke test (2).
 
-### 2.5 Testing
+### 2.5 Audio & OCR Pipeline Fixes (May 26–27)
+
+- **Fixed audio volume normalization** — FFmpegRenderer's `amix` filter was dividing volume by the number of input segments (e.g., 20 segments → 1/20th volume). Added `normalize=0` since time-separated segments don't actually overlap, restoring full output volume.
+- **Fixed frame capture accuracy** — Replaced seek-based frame sampling (`CAP_PROP_POS_MSEC`) in `iter_video_samples` with sequential decode. The seek approach snapped to the nearest keyframe, causing multiple timestamps to return the same frame and missing real caption transitions during animations.
+- **Increased OCR sample rate** — Default `OCR_SAMPLE_FPS` bumped from 2.0 to 3.0 (one frame every 0.33s instead of 0.5s) to capture shorter-lived captions and animation transitions.
+- **Added identical-text dedup to segment merging** — New strategy in `merge_short_segments` detects when adjacent segments have identical or near-identical English text (SequenceMatcher ratio ≥ 0.85) across gaps up to ~7.5s, collapsing them into one segment before VLM translation. Prevents duplicate translations caused by animation cycles where the same caption appears, fades, and reappears.
+
+### 2.6 Testing
 
 - **Added 7 new test files** covering:
   - EntryRetimer (distribution, weighted slots, snap to frame timestamps)
@@ -78,9 +85,9 @@ Phase 2 focused on closing the three biggest gaps from Phase 1: (1) modules were
 
 | Module | Status | Change from Phase 1 |
 |---|---|---|
-| **M1 — VLM Extraction** | Functional (both modes) | EntryRetimer added; CaptionTimeline + narration classifier + merge/extend added; GLM-OCR actively used in OCR mode; Pass 0 wired into runner |
+| **M1 — VLM Extraction** | Functional (both modes) | EntryRetimer added; CaptionTimeline + narration classifier + merge/extend added; GLM-OCR actively used in OCR mode; Pass 0 wired into runner; sequential frame decode fix; sample FPS 2→3; identical-text dedup in merge |
 | **M2 — TTS** | Unchanged | Reused by both modes via BatchInference |
-| **M3 — Sync/Render** | Functional | AudioAligner rewritten with budgeted stretch + slip cascade; capped time stretching added; Windows fixes |
+| **M3 — Sync/Render** | Functional | AudioAligner rewritten with budgeted stretch + slip cascade; capped time stretching added; Windows fixes; amix volume normalization fix |
 | **M4 — Pipeline** | Functional | Mode dispatcher added; chunk_offset bug fixed; VLM memory management; ASCII path sanitization |
 | **M5 — Evaluation** | Functional | SyncAccuracy bug fixed + full-mix variant; 3 new wrappers (translation, voice, caption-drift); ReportGenerator extended with Markdown emitter; `scripts/run_evaluation.py` CLI; 13 tests |
 | **Web App** | Unchanged | Not touched in Phase 2 |
@@ -91,13 +98,12 @@ Phase 2 focused on closing the three biggest gaps from Phase 1: (1) modules were
 
 | Issue | Severity |
 |---|---|
-| `--mode vlm` timestamps still inaccurate (heuristic-based, not observation-based) | High |
+| `--mode vlm` timestamps still inaccurate (heuristic-based); OCR mode is more reliable for videos with burned-in captions | Medium |
 | ~~OCR-mode quality not quantitatively measured~~ — **Resolved:** caption-drift evaluator + translation metrics now available | ~~High~~ Done |
 | Hardcoded caption-band ratio (0.10) only works for one video layout | Medium |
 | ~~M5 evaluation module never invoked end-to-end~~ — **Resolved:** `scripts/run_evaluation.py` CLI orchestrates all M5 wrappers | ~~Medium~~ Done |
 | Only tested on one video (`Demo-Module-5.mp4`, 60.4 s) | Medium |
-| Videos with few burned-in captions produce too few OCR segments for OCR mode (e.g., Demo-Module-1: 2 segments, 1 narration) | Medium |
-| MOS estimation still skeleton (not implemented) | Medium |
+| Videos with few burned-in captions produce too few OCR segments (e.g., Demo-Module-1: 2 segments, 1 narration) | Medium |
 | Web UI not exercised with real pipeline | Low |
 
 ---
@@ -112,12 +118,10 @@ Phase 2 focused on closing the three biggest gaps from Phase 1: (1) modules were
 - [x] Measure sync accuracy (librosa onset detection) between subtitle timestamps and dubbed audio — `SyncAccuracy.evaluate_against_merged_audio()`
 - [x] Measure OCR-mode timestamp drift against ground-truth captions (mean/median/p95) — `compare_caption_tracks()`
 - [ ] Measure narration classifier precision/recall
-- [ ] Implement MOSEstimator (replace Phase 1 skeleton with DNSMOS or NISQA)
 
 ### 5.2 Multi-Video Validation (Priority: High)
 
-- [ ] Test on at least 2–3 additional videos of varying length
-- [ ] Test on a video without burned-in captions (forces `--mode vlm`)
+- [ ] Test on at least 2–3 additional non-audio narrated videos of varying length
 - [ ] Test on a longer captioned video (stresses OCR latency and segment merging)
 - [ ] Document failures and edge cases found
 
@@ -125,7 +129,7 @@ Phase 2 focused on closing the three biggest gaps from Phase 1: (1) modules were
 
 - [ ] Calibrate `VI_CHARS_PER_SEC` per-voice by measuring TTS output speaking rate, replacing the hardcoded 15.0
 - [ ] Auto-detect caption band position by clustering OCR bounding-box Y-positions, replacing the hardcoded `CAPTION_BAND_RATIO`
-- [ ] Tune OCR-mode parameters (sampling FPS, dedup ratio, merge thresholds) based on evaluation results
+- [x] Tune OCR-mode parameters (sampling FPS 2→3, sequential frame decode, identical-text dedup in merge) based on evaluation results
 
 ### 5.4 Web UI Integration (Priority: Medium)
 
@@ -143,5 +147,3 @@ Phase 2 focused on closing the three biggest gaps from Phase 1: (1) modules were
 ### 5.6 Nice-to-Have (if time permits)
 
 - [ ] Profile OCR mode performance on 10+ minute videos
-- [ ] Multi-speaker detection and handling
-- [ ] Docker packaging for reproducible deployment

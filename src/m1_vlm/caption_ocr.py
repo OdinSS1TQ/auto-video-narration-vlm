@@ -263,8 +263,10 @@ def iter_video_samples(
 ) -> Iterator[Tuple[float, np.ndarray]]:
     """Yield (timestamp_sec, frame_bgr) at the requested rate.
 
-    Seeks directly to each sample timestamp — only decodes the frames
-    we actually need rather than every frame in the video.
+    Reads frames sequentially and yields every Nth frame to match the
+    requested sample_fps. Sequential decode avoids the keyframe-snap
+    problem of CAP_PROP_POS_MSEC seeking where multiple timestamps can
+    return the same keyframe, causing missed captions.
 
     Raises:
         IOError: if the video cannot be opened or has no frames.
@@ -282,18 +284,18 @@ def iter_video_samples(
         total_frames = cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0.0
         if fps <= 0 or total_frames <= 0:
             raise IOError(f"Video has no decodable frames: {video_path}")
-        duration_sec = total_frames / fps
 
-        step = 1.0 / sample_fps
-        t = 0.0
-        while t < duration_sec:
-            cap.set(cv2.CAP_PROP_POS_MSEC, t * 1000.0)
+        frame_interval = max(1, int(round(fps / sample_fps)))
+        frame_idx = 0
+
+        while True:
             ok, frame = cap.read()
             if not ok or frame is None:
-                t += step
-                continue
-            yield t, frame
-            t += step
+                break
+            if frame_idx % frame_interval == 0:
+                t = frame_idx / fps
+                yield t, frame
+            frame_idx += 1
     finally:
         cap.release()
 
@@ -459,14 +461,25 @@ def merge_short_segments(
         return []
 
     animation_gap_cap = max_gap_sec * animation_gap_multiplier
+    identical_gap_cap = max_gap_sec * 25  # ~7.5s at default — covers animation cycles
     merged: List[CaptionSegment] = [segments[0]]
     for nxt in segments[1:]:
         last = merged[-1]
         gap = nxt.start_sec - last.end_sec
 
-        # Strategy 1: animation/typewriter overlap — keep the longer text.
-        # Allows a wider gap than concatenation because animation cycles
-        # can leave a small pause between repetitions.
+        # Strategy 1: identical/near-identical text — collapse repeated captions
+        # from animation cycles (same text appears, fades, reappears).
+        if gap <= identical_gap_cap and _same_caption(last.en_text, nxt.en_text, 0.85):
+            longer = last if len(last.en_text) >= len(nxt.en_text) else nxt
+            merged[-1] = CaptionSegment(
+                start_sec=last.start_sec,
+                end_sec=max(last.end_sec, nxt.end_sec),
+                en_text=longer.en_text,
+                mid_frame=last.mid_frame,
+            )
+            continue
+
+        # Strategy 2: animation/typewriter overlap — keep the longer text.
         if gap <= animation_gap_cap and _is_prefix_animation(last.en_text, nxt.en_text):
             longer = last if len(last.en_text) >= len(nxt.en_text) else nxt
             merged[-1] = CaptionSegment(
@@ -481,7 +494,7 @@ def merge_short_segments(
             merged.append(nxt)
             continue
 
-        # Strategy 2: tight fragmentation — concatenate within budget.
+        # Strategy 3: tight fragmentation — concatenate within budget.
         combined_len = len(last.en_text) + 1 + len(nxt.en_text)
         if combined_len <= max_combined_chars:
             merged[-1] = CaptionSegment(

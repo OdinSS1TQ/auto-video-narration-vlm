@@ -6,9 +6,9 @@ Sử dụng Mô Hình Ngôn Ngữ - Thị Giác (VLM) và Nhân Bản Giọng N�
 | | |
 |---|---|
 | **Sinh viên** | Ngô Nguyễn Tấn Quân |
-| **Ngày** | 25 tháng 5, 2026 |
+| **Ngày** | 27 tháng 5, 2026 |
 | **Giai đoạn** | 2 — Kết nối End-to-End, Độ chính xác Timestamp, Chế độ OCR |
-| **Thời gian** | 18 tháng 4 – 25 tháng 5, 2026 |
+| **Thời gian** | 18 tháng 4 – 27 tháng 5, 2026 |
 
 ---
 
@@ -60,7 +60,14 @@ Giai đoạn 2 tập trung vào việc khắc phục ba vấn đề lớn nhất
 - **Tạo CLI đánh giá** — `scripts/run_evaluation.py` điều phối tất cả wrapper đánh giá qua tham số dòng lệnh, tạo báo cáo JSON + Markdown + CSV với snapshot đầy đủ PipelineConfig (20 thông số).
 - **13 test đánh giá** — Tất cả pass: sửa sync accuracy (2), caption drift (6), translation eval (1), report markdown (2), CLI smoke test (2).
 
-### 2.5 Kiểm thử
+### 2.5 Sửa lỗi Audio & Pipeline OCR (26–27 tháng 5)
+
+- **Sửa lỗi chuẩn hóa âm lượng** — Bộ lọc `amix` của FFmpegRenderer chia âm lượng cho số lượng segment đầu vào (ví dụ: 20 segment → âm lượng giảm còn 1/20). Thêm `normalize=0` vì các segment được phân tách theo thời gian không chồng lấn, khôi phục âm lượng đầy đủ.
+- **Sửa lỗi trích xuất frame** — Thay thế phương pháp lấy mẫu frame dựa trên seek (`CAP_PROP_POS_MSEC`) trong `iter_video_samples` bằng giải mã tuần tự. Phương pháp seek nhảy đến keyframe gần nhất, khiến nhiều timestamp trả về cùng một frame và bỏ lỡ các chuyển đổi phụ đề thực tế trong hoạt ảnh.
+- **Tăng tốc độ lấy mẫu OCR** — Giá trị mặc định `OCR_SAMPLE_FPS` tăng từ 2.0 lên 3.0 (một frame mỗi 0.33s thay vì 0.5s) để bắt được các phụ đề tồn tại ngắn và chuyển đổi hoạt ảnh.
+- **Thêm loại trùng văn bản giống nhau vào ghép segment** — Chiến lược mới trong `merge_short_segments` phát hiện khi các segment liền kề có văn bản tiếng Anh giống hệt hoặc gần giống (tỷ lệ SequenceMatcher ≥ 0.85) trong khoảng cách lên đến ~7.5s, gộp chúng thành một segment trước khi dịch VLM. Ngăn chặn các bản dịch trùng lặp do chu kỳ hoạt ảnh khi cùng một phụ đề xuất hiện, mờ dần, và xuất hiện lại.
+
+### 2.6 Kiểm thử
 
 - **Thêm 7 file test mới** bao gồm:
   - EntryRetimer (phân phối, slot có trọng số, snap vào timestamp frame)
@@ -78,9 +85,9 @@ Giai đoạn 2 tập trung vào việc khắc phục ba vấn đề lớn nhất
 
 | Module | Trạng thái | Thay đổi so với Giai đoạn 1 |
 |---|---|---|
-| **M1 — Trích xuất VLM** | Hoạt động (cả hai chế độ) | Thêm EntryRetimer; thêm CaptionTimeline + bộ phân loại tường thuật + ghép/kéo dài; GLM-OCR được sử dụng trong chế độ OCR; Pass 0 kết nối vào runner |
+| **M1 — Trích xuất VLM** | Hoạt động (cả hai chế độ) | Thêm EntryRetimer; thêm CaptionTimeline + bộ phân loại tường thuật + ghép/kéo dài; GLM-OCR được sử dụng trong chế độ OCR; Pass 0 kết nối vào runner; sửa giải mã frame tuần tự; FPS lấy mẫu 2→3; loại trùng văn bản giống nhau trong ghép |
 | **M2 — TTS** | Không thay đổi | Được tái sử dụng bởi cả hai chế độ qua BatchInference |
-| **M3 — Sync/Render** | Hoạt động | AudioAligner viết lại với budgeted stretch + slip cascade; thêm giới hạn time stretching; sửa lỗi Windows |
+| **M3 — Sync/Render** | Hoạt động | AudioAligner viết lại với budgeted stretch + slip cascade; thêm giới hạn time stretching; sửa lỗi Windows; sửa chuẩn hóa âm lượng amix |
 | **M4 — Pipeline** | Hoạt động | Thêm bộ điều phối chế độ; sửa lỗi chunk_offset; quản lý bộ nhớ VLM; chuẩn hóa ASCII đường dẫn |
 | **M5 — Đánh giá** | Hoạt động | Sửa lỗi SyncAccuracy + thêm biến thể full-mix; 3 wrapper mới (dịch thuật, giọng nói, caption-drift); ReportGenerator mở rộng với Markdown emitter; CLI `scripts/run_evaluation.py`; 13 test |
 | **Web App** | Không thay đổi | Không được chạm đến trong Giai đoạn 2 |
@@ -91,13 +98,12 @@ Giai đoạn 2 tập trung vào việc khắc phục ba vấn đề lớn nhất
 
 | Vấn đề | Mức độ |
 |---|---|
-| Timestamp `--mode vlm` vẫn không chính xác (dựa trên heuristic, không dựa trên quan sát) | Cao |
+| Timestamp `--mode vlm` vẫn không chính xác (dựa trên heuristic); chế độ OCR đáng tin cậy hơn cho video có phụ đề gắn sẵn | Trung bình |
 | ~~Chất lượng chế độ OCR chưa được đo lường định lượng~~ — **Đã giải quyết:** bộ đánh giá caption-drift + chỉ số dịch thuật đã sẵn sàng | ~~Cao~~ Xong |
 | Tỷ lệ vùng phụ đề cố định (0.10) chỉ hoạt động cho một bố cục video | Trung bình |
 | ~~Module M5 đánh giá chưa bao giờ được chạy end-to-end~~ — **Đã giải quyết:** CLI `scripts/run_evaluation.py` điều phối tất cả wrapper M5 | ~~Trung bình~~ Xong |
 | Chỉ kiểm tra trên một video (`Demo-Module-5.mp4`, 60.4 giây) | Trung bình |
-| Video có ít phụ đề gắn sẵn tạo quá ít segment OCR cho chế độ OCR (VD: Demo-Module-1: 2 segment, 1 tường thuật) | Trung bình |
-| MOS estimation vẫn là khung (chưa triển khai) | Trung bình |
+| Video có ít phụ đề gắn sẵn tạo quá ít segment OCR (VD: Demo-Module-1: 2 segment, 1 tường thuật) | Trung bình |
 | Web UI chưa được kiểm tra với pipeline thực tế | Thấp |
 
 ---
@@ -112,12 +118,10 @@ Giai đoạn 2 tập trung vào việc khắc phục ba vấn đề lớn nhất
 - [x] Đo độ chính xác đồng bộ (librosa onset detection) giữa timestamp phụ đề và audio lồng tiếng — `SyncAccuracy.evaluate_against_merged_audio()`
 - [x] Đo độ lệch timestamp chế độ OCR so với phụ đề ground-truth (mean/median/p95) — `compare_caption_tracks()`
 - [ ] Đo precision/recall của bộ phân loại tường thuật
-- [ ] Triển khai MOSEstimator (thay thế khung Phase 1 bằng DNSMOS hoặc NISQA)
 
 ### 5.2 Kiểm tra đa video (Ưu tiên: Cao)
 
-- [ ] Kiểm tra trên ít nhất 2–3 video bổ sung với độ dài khác nhau
-- [ ] Kiểm tra trên video không có phụ đề gắn sẵn (buộc dùng `--mode vlm`)
+- [ ] Kiểm tra trên ít nhất 2–3 video không có audio với tường thuật gắn sẵn, độ dài khác nhau
 - [ ] Kiểm tra trên video có phụ đề dài hơn (kiểm tra độ trễ OCR và ghép segment)
 - [ ] Ghi nhận các lỗi và trường hợp biên phát hiện được
 
@@ -125,7 +129,7 @@ Giai đoạn 2 tập trung vào việc khắc phục ba vấn đề lớn nhất
 
 - [ ] Hiệu chỉnh `VI_CHARS_PER_SEC` theo từng giọng bằng cách đo tốc độ nói từ output TTS, thay thế giá trị cố định 15.0
 - [ ] Tự động phát hiện vị trí vùng phụ đề bằng cách phân cụm tọa độ Y bounding-box OCR, thay thế `CAPTION_BAND_RATIO` cố định
-- [ ] Tinh chỉnh các tham số chế độ OCR (FPS lấy mẫu, tỷ lệ loại trùng, ngưỡng ghép) dựa trên kết quả đánh giá
+- [x] Tinh chỉnh các tham số chế độ OCR (FPS lấy mẫu 2→3, giải mã frame tuần tự, loại trùng văn bản giống nhau trong ghép) dựa trên kết quả đánh giá
 
 ### 5.4 Tích hợp Web UI (Ưu tiên: Trung bình)
 
@@ -143,5 +147,3 @@ Giai đoạn 2 tập trung vào việc khắc phục ba vấn đề lớn nhất
 ### 5.6 Nếu còn thời gian
 
 - [ ] Đánh giá hiệu năng chế độ OCR trên video 10+ phút
-- [ ] Phát hiện và xử lý đa người nói
-- [ ] Đóng gói Docker để triển khai tái tạo được

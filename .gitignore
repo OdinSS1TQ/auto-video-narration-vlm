@@ -65,3 +65,7 @@ models/
 
 # === Video ===
 *.mp4
+*.wav
+
+
+.claude/
