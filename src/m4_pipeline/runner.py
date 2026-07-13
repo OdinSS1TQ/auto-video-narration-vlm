@@ -87,15 +87,23 @@ class PipelineRunner:
     async def run(
         self,
         video_path: str | Path,
-        reference_audio_path: str | Path,
+        reference_audio_path: str | Path | None = None,
         output_path: Optional[str | Path] = None,
+        voice_source: str = "clone",
+        preset_voice_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Dispatch to the configured pipeline mode ('vlm' or 'ocr')."""
         mode = self.config.pipeline_mode
         if mode == "vlm":
-            return await self._run_vlm_mode(video_path, reference_audio_path, output_path)
+            return await self._run_vlm_mode(
+                video_path, reference_audio_path, output_path,
+                voice_source=voice_source, preset_voice_id=preset_voice_id,
+            )
         if mode == "ocr":
-            return await self._run_ocr_mode(video_path, reference_audio_path, output_path)
+            return await self._run_ocr_mode(
+                video_path, reference_audio_path, output_path,
+                voice_source=voice_source, preset_voice_id=preset_voice_id,
+            )
         raise PipelineError(
             f"Unknown pipeline_mode={mode!r}; expected 'vlm' or 'ocr'"
         )
@@ -103,8 +111,10 @@ class PipelineRunner:
     async def _run_ocr_mode(
         self,
         video_path: str | Path,
-        reference_audio_path: str | Path,
+        reference_audio_path: str | Path | None = None,
         output_path: Optional[str | Path] = None,
+        voice_source: str = "clone",
+        preset_voice_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """OCR-driven pipeline: GLM-OCR captions → VLM translation → TTS."""
         import json as _json
@@ -114,6 +124,7 @@ class PipelineRunner:
         from src.m1_vlm.caption_ocr import (
             CaptionTimeline,
             merge_short_segments,
+            drop_duplicate_fragments,
             extend_end_times,
             get_video_duration_sec,
         )
@@ -122,11 +133,15 @@ class PipelineRunner:
         self._current_step = 0
 
         video_path = Path(video_path)
-        reference_audio_path = Path(reference_audio_path)
         if not video_path.exists():
             raise PipelineError(f"Video not found: {video_path}")
-        if not reference_audio_path.exists():
-            raise PipelineError(f"Reference audio not found: {reference_audio_path}")
+
+        if voice_source == "clone":
+            if reference_audio_path is None:
+                raise PipelineError("reference_audio_path required for voice_source='clone'")
+            reference_audio_path = Path(reference_audio_path)
+            if not reference_audio_path.exists():
+                raise PipelineError(f"Reference audio not found: {reference_audio_path}")
 
         safe_stem = _re.sub(r"[^A-Za-z0-9._-]+", "_", video_path.stem).strip("_") or "video"
         if output_path is None:
@@ -141,7 +156,7 @@ class PipelineRunner:
 
         results: Dict[str, Any] = {
             "video_path": str(video_path),
-            "reference_audio": str(reference_audio_path),
+            "reference_audio": str(reference_audio_path) if voice_source == "clone" else f"preset:{preset_voice_id}",
             "mode": "ocr",
         }
 
@@ -279,6 +294,23 @@ class PipelineRunner:
             logger.info(
                 f"Narration merge: {n_before_merge} → {len(segments)} segments"
             )
+
+            # === Step 2b': Drop OCR transition artifacts ===
+            # Remove short blips/fragments that merely repeat or are a piece of a
+            # fuller nearby caption (caption-transition reads). Without this the
+            # SRT shows a long line followed by a chopped duplicate of its tail.
+            n_before_fragdrop = len(segments)
+            segments = drop_duplicate_fragments(
+                segments,
+                dup_ratio=self.config.caption_dedup_ratio,
+            )
+            results["n_segments_after_fragment_drop"] = len(segments)
+            if len(segments) != n_before_fragdrop:
+                logger.info(
+                    f"Fragment drop: {n_before_fragdrop} → {len(segments)} "
+                    f"segments (removed {n_before_fragdrop - len(segments)} "
+                    f"duplicate/fragment artifacts)"
+                )
 
             # === Step 2c: Extend end times for smoother TTS pacing ===
             try:
@@ -422,16 +454,26 @@ class PipelineRunner:
                 hf_token=self.config.tts_hf_token,
                 sample_rate=self.config.tts_sample_rate,
             )
-            logger.info(f"Encoding reference voice: {reference_audio_path.name}")
-            ref_codes = tts_client.encode_reference(reference_audio_path, use_cache=True)
             batch_inference = BatchInference(tts_client)
             srt_entries = SRTBuilder.load_srt(srt_path)
-            audio_segments = await batch_inference.process_all(
-                segments=srt_entries,
-                output_dir=work_dir / "audio_chunks",
-                ref_codes=ref_codes,
-                ref_text=None,
-            )
+
+            if voice_source == "preset":
+                logger.info(f"Using VieNeu preset voice: {preset_voice_id}")
+                preset_voice = tts_client.get_preset_voice(preset_voice_id)
+                audio_segments = await batch_inference.process_all(
+                    segments=srt_entries,
+                    output_dir=work_dir / "audio_chunks",
+                    voice=preset_voice,
+                )
+            else:
+                logger.info(f"Encoding reference voice: {reference_audio_path.name}")
+                ref_codes = tts_client.encode_reference(reference_audio_path, use_cache=True)
+                audio_segments = await batch_inference.process_all(
+                    segments=srt_entries,
+                    output_dir=work_dir / "audio_chunks",
+                    ref_codes=ref_codes,
+                    ref_text=None,
+                )
 
             # === Step 6: Audio alignment ===
             self._update_progress("audio_alignment")
@@ -477,8 +519,10 @@ class PipelineRunner:
     async def _run_vlm_mode(
         self,
         video_path: str | Path,
-        reference_audio_path: str | Path,
+        reference_audio_path: str | Path | None = None,
         output_path: Optional[str | Path] = None,
+        voice_source: str = "clone",
+        preset_voice_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Run the complete dubbing pipeline.
@@ -495,12 +539,15 @@ class PipelineRunner:
         self._current_step = 0
 
         video_path = Path(video_path)
-        reference_audio_path = Path(reference_audio_path)
-
         if not video_path.exists():
             raise PipelineError(f"Video not found: {video_path}")
-        if not reference_audio_path.exists():
-            raise PipelineError(f"Reference audio not found: {reference_audio_path}")
+
+        if voice_source == "clone":
+            if reference_audio_path is None:
+                raise PipelineError("reference_audio_path required for voice_source='clone'")
+            reference_audio_path = Path(reference_audio_path)
+            if not reference_audio_path.exists():
+                raise PipelineError(f"Reference audio not found: {reference_audio_path}")
 
         # Setup output directory.
         # Sanitize stem to ASCII-safe — Windows passes paths to subprocesses
@@ -518,7 +565,7 @@ class PipelineRunner:
 
         results = {
             "video_path": str(video_path),
-            "reference_audio": str(reference_audio_path),
+            "reference_audio": str(reference_audio_path) if voice_source == "clone" else f"preset:{preset_voice_id}",
         }
 
         try:
@@ -792,21 +839,28 @@ class PipelineRunner:
                 sample_rate=self.config.tts_sample_rate,
             )
 
-            # Encode reference audio ONCE — ref_codes are reused for all segments.
-            # VieNeu v2 Turbo: no ref_text required (truly zero-shot).
-            logger.info(f"Encoding reference voice: {reference_audio_path.name}")
-            ref_codes = tts_client.encode_reference(reference_audio_path, use_cache=True)
-
             batch_inference = BatchInference(tts_client)
 
             # Load SRT entries for TTS
             srt_entries = SRTBuilder.load_srt(srt_path)
-            audio_segments = await batch_inference.process_all(
-                segments=srt_entries,
-                output_dir=work_dir / "audio_chunks",
-                ref_codes=ref_codes,   # pre-encoded, reused across all segments
-                ref_text=None,         # v2 Turbo: zero-shot, no transcript needed
-            )
+
+            if voice_source == "preset":
+                logger.info(f"Using VieNeu preset voice: {preset_voice_id}")
+                preset_voice = tts_client.get_preset_voice(preset_voice_id)
+                audio_segments = await batch_inference.process_all(
+                    segments=srt_entries,
+                    output_dir=work_dir / "audio_chunks",
+                    voice=preset_voice,
+                )
+            else:
+                logger.info(f"Encoding reference voice: {reference_audio_path.name}")
+                ref_codes = tts_client.encode_reference(reference_audio_path, use_cache=True)
+                audio_segments = await batch_inference.process_all(
+                    segments=srt_entries,
+                    output_dir=work_dir / "audio_chunks",
+                    ref_codes=ref_codes,
+                    ref_text=None,
+                )
 
             # === Step 7: Audio Alignment ===
             self._update_progress("audio_alignment")

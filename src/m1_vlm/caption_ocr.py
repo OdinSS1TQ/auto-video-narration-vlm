@@ -508,6 +508,89 @@ def merge_short_segments(
     return merged
 
 
+def _containment_ratio(short: str, long: str) -> float:
+    """Fraction of `short` that appears as one contiguous run inside `long`.
+
+    1.0 means `short` is a substring of `long` (modulo the longest common run).
+    Used to recognise a partial OCR read that is a fragment of a fuller caption.
+    """
+    if not short:
+        return 0.0
+    match = SequenceMatcher(None, short, long).find_longest_match(
+        0, len(short), 0, len(long)
+    )
+    return match.size / len(short)
+
+
+def drop_duplicate_fragments(
+    segments: List[CaptionSegment],
+    dup_ratio: float = 0.85,
+    contain_ratio: float = 0.8,
+    window_sec: float = 30.0,
+    blip_max_sec: float = 2.5,
+) -> List[CaptionSegment]:
+    """Remove transition-artifact segments that merely repeat or fragment a neighbor.
+
+    Dense OCR sampling of burned-in captions catches transitional frames: a
+    previous caption flashing back for one sample, or a partial read of an
+    incoming caption. These create short entries whose text duplicates, or is a
+    contiguous fragment of, a fuller nearby entry — producing the repeated and
+    chopped lines seen in the final SRT. ``merge_short_segments`` cannot fix
+    them: it only compares *adjacent* segments, its identical-merge gap cap is
+    a few seconds, and a short *tail* of a long caption is neither a near-
+    duplicate (full-string ratio is low) nor a prefix-animation of it.
+
+    A segment ``i`` is dropped when another segment ``j`` within ``+/-
+    window_sec`` is "more complete" AND matches it, where:
+
+      - **Fragment**: ``len(j.text) > len(i.text)`` and ``i``'s text is
+        contained (>= ``contain_ratio``) inside ``j``'s text. Speaking ``j``
+        alone loses nothing because ``i`` is literally a piece of it.
+      - **Duplicate blip**: ``i`` is near-duplicate of ``j`` (ratio >=
+        ``dup_ratio``), ``i`` is shorter on screen than ``j``
+        (``j.duration > i.duration``) and ``i`` lasts at most ``blip_max_sec``.
+        The duration condition preserves *genuine* full-duration repeats while
+        removing momentary flashes.
+
+    The asymmetric "more complete" conditions guarantee that only the poorer
+    copy in any matched pair is removed, so a cluster of artifacts collapses to
+    its single richest member. Pure function — order is preserved for kept
+    segments.
+    """
+    if not segments:
+        return []
+
+    n = len(segments)
+    keep = [True] * n
+    for i in range(n):
+        si = segments[i]
+        ti = si.en_text
+        if not ti:
+            continue
+        for j in range(n):
+            if i == j:
+                continue
+            sj = segments[j]
+            if abs(sj.start_sec - si.start_sec) > window_sec:
+                continue
+
+            # Fragment: i is a contiguous piece of a longer-text j.
+            if len(sj.en_text) > len(ti) and _containment_ratio(ti, sj.en_text) >= contain_ratio:
+                keep[i] = False
+                break
+
+            # Duplicate blip: i is a short near-duplicate of a longer-on-screen j.
+            if (
+                si.duration_sec <= blip_max_sec
+                and sj.duration_sec > si.duration_sec
+                and _same_caption(ti, sj.en_text, dup_ratio)
+            ):
+                keep[i] = False
+                break
+
+    return [s for s, k in zip(segments, keep) if k]
+
+
 def extend_end_times(
     segments: List[CaptionSegment],
     extend_sec: float = 0.5,

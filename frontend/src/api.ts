@@ -63,6 +63,16 @@ export interface UploadResponse {
   size_mb: number;
 }
 
+export interface VoiceOption {
+  id: string;
+  label: string;
+}
+
+export interface VoiceListResponse {
+  voices: VoiceOption[];
+  default: string | null;
+}
+
 export interface ProcessResponse {
   job_id: string;
   status: string;
@@ -183,11 +193,21 @@ export const api = {
   },
 
   /**
+   * List available VieNeu preset voices
+   */
+  async listVoices(): Promise<VoiceListResponse> {
+    const res = await fetch(`${BASE_API_URL}/tts/voices`);
+    return handleResponse<VoiceListResponse>(res);
+  },
+
+  /**
    * Start dubbing process pipeline
    */
   async startProcess(params: {
     video_path: string;
-    audio_path: string;
+    audio_path?: string;
+    voice_source?: 'clone' | 'preset';
+    preset_voice_id?: string;
     vlm_mode?: string;
     tts_engine?: string;
     source_lang?: string;

@@ -51,7 +51,7 @@ export default function JobDetailView({ job, onGoBack, onCancelJob }: JobDetailV
           <div>
             <div className="flex items-center gap-3 flex-wrap">
               <h2 className="font-mono text-xl font-bold tracking-tight text-[#e5e1e4]">{job.id}</h2>
-              
+
               {/* Badge based on status */}
               {job.status === 'PROCESSING' && (
                 <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-blue-500/10 border border-blue-500/30 text-blue-400 font-mono text-[9px] font-semibold uppercase">
@@ -77,7 +77,7 @@ export default function JobDetailView({ job, onGoBack, onCancelJob }: JobDetailV
                 </span>
               )}
             </div>
-            
+
             <p className="text-xs text-[#c2c6d6] mt-2 font-mono">
               Source: <span className="text-[#adc6ff]">{job.sourceMedia}</span> | Target: <span className="text-[#adc6ff]">{job.targetLangs.join(', ')}</span>
             </p>
@@ -107,11 +107,10 @@ export default function JobDetailView({ job, onGoBack, onCancelJob }: JobDetailV
               <button
                 disabled={job.status === 'FAILED'}
                 onClick={() => onCancelJob(job.id)}
-                className={`px-4 py-2 text-xs font-semibold rounded-md transition flex items-center gap-1.5 cursor-pointer border ${
-                  job.status === 'FAILED'
-                    ? 'border-gray-800 text-gray-600 cursor-not-allowed'
-                    : 'bg-red-500/15 hover:bg-red-500/25 text-red-400 border-red-500/20'
-                }`}
+                className={`px-4 py-2 text-xs font-semibold rounded-md transition flex items-center gap-1.5 cursor-pointer border ${job.status === 'FAILED'
+                  ? 'border-gray-800 text-gray-600 cursor-not-allowed'
+                  : 'bg-red-500/15 hover:bg-red-500/25 text-red-400 border-red-500/20'
+                  }`}
               >
                 <XCircle className="w-3.5 h-3.5" />
                 <span>Cancel Job</span>
@@ -123,10 +122,10 @@ export default function JobDetailView({ job, onGoBack, onCancelJob }: JobDetailV
 
       {/* Main layout contents */}
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
-        
+
         {/* Left pane: Overall progress & Timeline Steps (8 columns) */}
         <div className="xl:col-span-8 flex flex-col gap-6">
-          
+
           {/* Module A: Overall Progress percent bar */}
           <div className="bg-[#141416] border border-[#1c1b1d] rounded-lg p-6">
             <div className="flex items-center justify-between mb-4">
@@ -137,19 +136,18 @@ export default function JobDetailView({ job, onGoBack, onCancelJob }: JobDetailV
             {/* Horizontal custom loader bar */}
             <div className="w-full bg-[#1c1b1d] h-3 rounded-full border border-[#1c1b1d] overflow-hidden mb-3">
               <div
-                className={`h-full rounded-full transition-all duration-300 ${
-                  job.status === 'FAILED'
-                    ? 'bg-red-500'
-                    : job.status === 'COMPLETE'
+                className={`h-full rounded-full transition-all duration-300 ${job.status === 'FAILED'
+                  ? 'bg-red-500'
+                  : job.status === 'COMPLETE'
                     ? 'bg-emerald-500'
                     : 'bg-gradient-to-r from-blue-600 via-[#3626ce] to-[#adc6ff] animate-pulse'
-                }`}
+                  }`}
                 style={{ width: `${job.overallProgress}%` }}
               ></div>
             </div>
 
             <div className="flex items-center justify-between text-[11px] font-mono text-[#c2c6d6]">
-              <span>Started: 14:32:01 UTC</span>
+              <span></span>
               <span>
                 {job.status === 'COMPLETE' ? (
                   <span className="text-emerald-400">Pipeline Finished (100%)</span>
@@ -158,7 +156,7 @@ export default function JobDetailView({ job, onGoBack, onCancelJob }: JobDetailV
                 ) : job.status === 'QUEUED' ? (
                   <span>Queued in rendering pool</span>
                 ) : (
-                  <span>Est. Remaining: ~4m 12s</span>
+                  <span></span>
                 )}
               </span>
             </div>
@@ -179,13 +177,12 @@ export default function JobDetailView({ job, onGoBack, onCancelJob }: JobDetailV
                 return (
                   <div
                     key={idx}
-                    className={`flex items-start gap-4 p-3 rounded-md border transition-all ${
-                      isStepActive
-                        ? 'bg-[#1c1b1d] border-[#adc6ff]/40'
-                        : isStepCompleted
+                    className={`flex items-start gap-4 p-3 rounded-md border transition-all ${isStepActive
+                      ? 'bg-[#1c1b1d] border-[#adc6ff]/40'
+                      : isStepCompleted
                         ? 'bg-[#141416] border-[#1c1b1d]'
                         : 'bg-[#141416] border-transparent opacity-50'
-                    }`}
+                      }`}
                   >
                     {/* Circle icon marker column */}
                     <div className="pt-0.5" onClick={(e) => e.stopPropagation()}>
@@ -209,13 +206,12 @@ export default function JobDetailView({ job, onGoBack, onCancelJob }: JobDetailV
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between gap-2">
                         <span
-                          className={`text-xs font-semibold ${
-                            isStepActive ? 'text-[#adc6ff]' : isStepCompleted ? 'text-gray-200' : 'text-gray-400'
-                          }`}
+                          className={`text-xs font-semibold ${isStepActive ? 'text-[#adc6ff]' : isStepCompleted ? 'text-gray-200' : 'text-gray-400'
+                            }`}
                         >
                           {step.name}
                         </span>
-                        
+
                         {step.duration && (
                           <span className="font-mono text-[10px] text-[#adc6ff]">
                             {step.duration}
@@ -288,7 +284,7 @@ export default function JobDetailView({ job, onGoBack, onCancelJob }: JobDetailV
                   </div>
                 );
               })}
-              
+
               {/* Pulsing prompt indicator if processing */}
               {job.status === 'PROCESSING' && (
                 <div className="flex items-center gap-1.5 text-[#adc6ff] animate-pulse">
@@ -296,7 +292,7 @@ export default function JobDetailView({ job, onGoBack, onCancelJob }: JobDetailV
                   <span className="w-1.5 h-3.5 bg-[#adc6ff]"></span>
                 </div>
               )}
-              
+
               <div />
             </div>
 

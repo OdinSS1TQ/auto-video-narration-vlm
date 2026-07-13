@@ -1,6 +1,6 @@
-import React, { useState, useRef } from 'react';
-import { Video, HelpCircle, FileAudio, Mic, ToggleLeft, ToggleRight, Play, CheckCircle2, ChevronDown, RefreshCw, Sparkles, AlertTriangle } from 'lucide-react';
-import { api } from '../api';
+import React, { useState, useRef, useEffect } from 'react';
+import { Video, HelpCircle, FileAudio, ToggleLeft, ToggleRight, Play, CheckCircle2, ChevronDown, RefreshCw, Sparkles, AlertTriangle, Users } from 'lucide-react';
+import { api, VoiceOption } from '../api';
 
 interface CreateNewDubProps {
   onAddJob?: (job: any) => void; // Kept for interface compatibility
@@ -24,13 +24,17 @@ export default function CreateNewDub({ onNavigateToJobs, onJobCreated }: CreateN
   // Selected Visual States
   const [selectedVideo, setSelectedVideo] = useState<{ name: string; size: string } | null>(null);
   const [selectedAudioName, setSelectedAudioName] = useState<string | null>(null);
-  const [voiceSampleType, setVoiceSampleType] = useState<'upload' | 'mic'>('upload');
+  const [voiceSampleType, setVoiceSampleType] = useState<'upload' | 'preset'>('upload');
+
+  // Preset voices
+  const [presetVoices, setPresetVoices] = useState<VoiceOption[]>([]);
+  const [selectedPresetId, setSelectedPresetId] = useState<string | null>(null);
 
   // Upload progress and loading states
   const [uploadingVideo, setUploadingVideo] = useState(false);
   const [uploadingAudio, setUploadingAudio] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  
+
   // Drag-and-drop state
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -127,13 +131,32 @@ export default function CreateNewDub({ onNavigateToJobs, onJobCreated }: CreateN
     }
   };
 
+  // Fetch preset voices once on mount
+  useEffect(() => {
+    api.listVoices()
+      .then((res) => {
+        setPresetVoices(res.voices);
+        if (res.voices.length > 0) {
+          setSelectedPresetId(res.default ?? res.voices[0].id);
+        }
+      })
+      .catch((err) => console.error('Failed to load preset voices', err));
+  }, []);
+
   // Build and submit the dubbing job
   const handleGenerate = async () => {
     if (!videoPath) {
       setSubmitError('Please select or upload a source video.');
       return;
     }
-    if (!audioPath) {
+
+    const usingPreset = voiceSampleType === 'preset';
+    if (usingPreset) {
+      if (!selectedPresetId) {
+        setSubmitError('Please choose a VieNeu preset voice.');
+        return;
+      }
+    } else if (!audioPath) {
       setSubmitError('Please select or upload a voice reference audio.');
       return;
     }
@@ -144,13 +167,15 @@ export default function CreateNewDub({ onNavigateToJobs, onJobCreated }: CreateN
     try {
       const res = await api.startProcess({
         video_path: videoPath,
-        audio_path: audioPath,
+        audio_path: usingPreset ? undefined : audioPath!,
+        voice_source: usingPreset ? 'preset' : 'clone',
+        preset_voice_id: usingPreset ? selectedPresetId! : undefined,
         pipeline_mode: pipelineMode,
         vlm_mode: vlmMode,
         tts_engine: ttsEngine,
         source_lang: sourceLang,
         target_lang: targetLang,
-        keep_original_audio: keepOriginalAudio
+        keep_original_audio: keepOriginalAudio,
       });
       setIsGenerating(false);
       if (onJobCreated) {
@@ -200,7 +225,7 @@ export default function CreateNewDub({ onNavigateToJobs, onJobCreated }: CreateN
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-8 items-start">
         {/* Left Column - Inputs (8 columns on wide screen) */}
         <div className="xl:col-span-8 flex flex-col gap-6">
-          
+
           {/* Module 1: Source Video */}
           <div className="bg-[#141416] border border-[#1c1b1d] rounded-lg p-6">
             <div className="flex items-center justify-between mb-4 pb-3 border-b border-[#1c1b1d]">
@@ -217,13 +242,12 @@ export default function CreateNewDub({ onNavigateToJobs, onJobCreated }: CreateN
               onDragLeave={handleDragLeave}
               onDrop={handleDrop}
               onClick={() => !uploadingVideo && fileInputRef.current?.click()}
-              className={`border-2 border-dashed rounded-lg p-8 flex flex-col items-center justify-center text-center transition-all cursor-pointer ${
-                isDragging
-                  ? 'border-[#adc6ff] bg-[#adc6ff]/5'
-                  : selectedVideo
+              className={`border-2 border-dashed rounded-lg p-8 flex flex-col items-center justify-center text-center transition-all cursor-pointer ${isDragging
+                ? 'border-[#adc6ff] bg-[#adc6ff]/5'
+                : selectedVideo
                   ? 'border-emerald-500/50 bg-emerald-500/5'
                   : 'border-[#1c1b1d] hover:border-[#adc6ff]/30 hover:bg-[#1c1b1d]/40'
-              } ${uploadingVideo ? 'pointer-events-none opacity-60' : ''}`}
+                } ${uploadingVideo ? 'pointer-events-none opacity-60' : ''}`}
             >
               <input
                 ref={fileInputRef}
@@ -283,11 +307,10 @@ export default function CreateNewDub({ onNavigateToJobs, onJobCreated }: CreateN
                     key={preset.name}
                     type="button"
                     onClick={() => handleSelectPresetVideo(preset)}
-                    className={`p-2.5 rounded-md border text-left flex flex-col justify-between transition cursor-pointer ${
-                      videoPath === preset.path
-                        ? 'bg-emerald-500/10 border-emerald-500 text-[#e5e1e4]'
-                        : 'bg-[#1c1b1d] border-[#1c1b1d] hover:border-[#424754] text-[#c2c6d6] hover:text-[#e5e1e4]'
-                    }`}
+                    className={`p-2.5 rounded-md border text-left flex flex-col justify-between transition cursor-pointer ${videoPath === preset.path
+                      ? 'bg-emerald-500/10 border-emerald-500 text-[#e5e1e4]'
+                      : 'bg-[#1c1b1d] border-[#1c1b1d] hover:border-[#424754] text-[#c2c6d6] hover:text-[#e5e1e4]'
+                      }`}
                   >
                     <span className="text-lg mb-1">{preset.icon}</span>
                     <span className="text-[11px] font-semibold truncate block w-full">{preset.name}</span>
@@ -313,91 +336,113 @@ export default function CreateNewDub({ onNavigateToJobs, onJobCreated }: CreateN
               <button
                 type="button"
                 onClick={() => setVoiceSampleType('upload')}
-                className={`p-4 rounded-lg border text-center flex flex-col items-center justify-center gap-2 transition cursor-pointer ${
-                  voiceSampleType === 'upload'
-                    ? 'bg-[#2a2a2c]/65 border-[#adc6ff] text-[#adc6ff]'
-                    : 'bg-[#1c1b1d] border-[#1c1b1d] hover:border-[#424754] text-[#c2c6d6] hover:text-[#e5e1e4]'
-                }`}
+                className={`p-4 rounded-lg border text-center flex flex-col items-center justify-center gap-2 transition cursor-pointer ${voiceSampleType === 'upload'
+                  ? 'bg-[#2a2a2c]/65 border-[#adc6ff] text-[#adc6ff]'
+                  : 'bg-[#1c1b1d] border-[#1c1b1d] hover:border-[#424754] text-[#c2c6d6] hover:text-[#e5e1e4]'
+                  }`}
               >
                 <div className="w-8 h-8 rounded-full bg-[#0d0d0f] flex items-center justify-center border border-[#1c1b1d]">
                   <FileAudio className="w-4 h-4" />
                 </div>
                 <div>
-                  <span className="text-xs font-bold block">Upload Audio File</span>
-                  <span className="font-mono text-[9px] text-[#c2c6d6]">WAV, MP3, M4A</span>
+                  <span className="text-xs font-bold block">Upload / Preset File</span>
+                  <span className="font-mono text-[9px] text-[#c2c6d6]">Clone a voice (WAV, MP3, M4A)</span>
                 </div>
               </button>
 
               <button
                 type="button"
-                onClick={() => {
-                  setVoiceSampleType('mic');
-                  alert('Mic recording is a mockup for browser. Please upload or select the speaker preset for actual local run.');
-                  setVoiceSampleType('upload');
-                }}
-                className={`p-4 rounded-lg border text-center flex flex-col items-center justify-center gap-2 transition cursor-pointer opacity-60`}
+                onClick={() => setVoiceSampleType('preset')}
+                className={`p-4 rounded-lg border text-center flex flex-col items-center justify-center gap-2 transition cursor-pointer ${voiceSampleType === 'preset'
+                  ? 'bg-[#2a2a2c]/65 border-[#adc6ff] text-[#adc6ff]'
+                  : 'bg-[#1c1b1d] border-[#1c1b1d] hover:border-[#424754] text-[#c2c6d6] hover:text-[#e5e1e4]'
+                  }`}
               >
                 <div className="w-8 h-8 rounded-full bg-[#0d0d0f] flex items-center justify-center border border-[#1c1b1d]">
-                  <Mic className="w-4 h-4" />
+                  <Users className="w-4 h-4" />
                 </div>
                 <div>
-                  <span className="text-xs font-bold block">Record from Mic</span>
-                  <span className="font-mono text-[9px] text-[#c2c6d6]">Use system microphone</span>
+                  <span className="text-xs font-bold block">VieNeu Voice</span>
+                  <span className="font-mono text-[9px] text-[#c2c6d6]">Built-in narrator</span>
                 </div>
               </button>
             </div>
 
-            {/* Upload Area */}
-            <div className="bg-[#1c1b1d] border border-[#1c1b1d] rounded-md p-4">
-              <span className="text-xs font-bold text-[#c2c6d6] block mb-2">Select preloaded voice preset or upload file:</span>
-              
-              <div className="flex flex-wrap gap-2 mb-3">
-                {PRESET_AUDIOS.map((preset) => (
-                  <button
-                    key={preset.name}
-                    type="button"
-                    onClick={() => handleSelectPresetAudio(preset)}
-                    className={`px-3 py-1.5 rounded-md text-xs font-mono transition border cursor-pointer ${
-                      audioPath === preset.path
+            {/* Preset voice panel */}
+            {voiceSampleType === 'preset' && (
+              <div className="bg-[#1c1b1d] border border-[#1c1b1d] rounded-md p-4 mb-3">
+                <span className="text-xs font-bold text-[#c2c6d6] block mb-2">Choose a built-in VieNeu narrator:</span>
+                {presetVoices.length === 0 ? (
+                  <p className="text-xs text-[#c2c6d6]">
+                    No preset voices found in the local cache. Please use the Upload / Preset File tab instead.
+                  </p>
+                ) : (
+                  <select
+                    value={selectedPresetId ?? ''}
+                    onChange={(e) => setSelectedPresetId(e.target.value)}
+                    className="w-full bg-[#141416] border border-[#424754] text-xs px-2.5 py-2 rounded focus:outline-none focus:border-[#adc6ff]"
+                  >
+                    {presetVoices.map((v) => (
+                      <option key={v.id} value={v.id}>{v.label}</option>
+                    ))}
+                  </select>
+                )}
+                <p className="text-[10px] text-[#c2c6d6] mt-2">Narration uses this generic voice (the original speaker is not cloned).</p>
+              </div>
+            )}
+
+            {/* Upload Area (file upload + preloaded audio presets) */}
+            {voiceSampleType !== 'preset' && (
+              <div className="bg-[#1c1b1d] border border-[#1c1b1d] rounded-md p-4">
+                <span className="text-xs font-bold text-[#c2c6d6] block mb-2">Select preloaded voice preset or upload file:</span>
+
+                <div className="flex flex-wrap gap-2 mb-3">
+                  {PRESET_AUDIOS.map((preset) => (
+                    <button
+                      key={preset.name}
+                      type="button"
+                      onClick={() => handleSelectPresetAudio(preset)}
+                      className={`px-3 py-1.5 rounded-md text-xs font-mono transition border cursor-pointer ${audioPath === preset.path
                         ? 'bg-emerald-500/10 border-emerald-500 text-emerald-400'
                         : 'bg-[#141416] border-[#1c1b1d] hover:border-[#424754] text-[#c2c6d6]'
-                    }`}
-                  >
-                    {preset.name}
-                  </button>
-                ))}
-              </div>
-
-              <div className="flex items-center gap-3">
-                <input
-                  ref={audioInputRef}
-                  type="file"
-                  accept="audio/wav, audio/mpeg, audio/flac, audio/ogg, audio/x-m4a"
-                  onChange={handleAudioFileSelect}
-                  className="hidden"
-                />
-                <button
-                  type="button"
-                  disabled={uploadingAudio}
-                  onClick={() => audioInputRef.current?.click()}
-                  className="px-3 py-1.5 bg-[#2a2a2c] hover:bg-[#353437] text-xs rounded border border-[#424754] text-[#e5e1e4] flex items-center gap-2 cursor-pointer disabled:opacity-60"
-                >
-                  {uploadingAudio ? (
-                    <RefreshCw className="w-3 h-3 animate-spin text-[#adc6ff]" />
-                  ) : (
-                    <FileAudio className="w-3 h-3 text-[#adc6ff]" />
-                  )}
-                  <span>Upload Custom Speaker reference</span>
-                </button>
-              </div>
-
-              {selectedAudioName && (
-                <div className="mt-3 flex items-center gap-2 text-xs text-emerald-400">
-                  <CheckCircle2 className="w-3.5 h-3.5" />
-                  <span>Loaded profile target: <b>{selectedAudioName}</b> {audioPath?.includes('uploads') ? '(Custom Uploaded)' : '(System Preset)'}</span>
+                        }`}
+                    >
+                      {preset.name}
+                    </button>
+                  ))}
                 </div>
-              )}
-            </div>
+
+                <div className="flex items-center gap-3">
+                  <input
+                    ref={audioInputRef}
+                    type="file"
+                    accept="audio/wav, audio/mpeg, audio/flac, audio/ogg, audio/x-m4a"
+                    onChange={handleAudioFileSelect}
+                    className="hidden"
+                  />
+                  <button
+                    type="button"
+                    disabled={uploadingAudio}
+                    onClick={() => audioInputRef.current?.click()}
+                    className="px-3 py-1.5 bg-[#2a2a2c] hover:bg-[#353437] text-xs rounded border border-[#424754] text-[#e5e1e4] flex items-center gap-2 cursor-pointer disabled:opacity-60"
+                  >
+                    {uploadingAudio ? (
+                      <RefreshCw className="w-3 h-3 animate-spin text-[#adc6ff]" />
+                    ) : (
+                      <FileAudio className="w-3 h-3 text-[#adc6ff]" />
+                    )}
+                    <span>Upload Custom Speaker reference</span>
+                  </button>
+                </div>
+
+                {selectedAudioName && (
+                  <div className="mt-3 flex items-center gap-2 text-xs text-emerald-400">
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>Loaded profile target: <b>{selectedAudioName}</b> {audioPath?.includes('uploads') ? '(Custom Uploaded)' : '(System Preset)'}</span>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
 
@@ -456,24 +501,22 @@ export default function CreateNewDub({ onNavigateToJobs, onJobCreated }: CreateN
                   <button
                     type="button"
                     onClick={() => setPipelineMode('vlm')}
-                    className={`py-1.5 text-xs font-semibold rounded cursor-pointer transition ${
-                      pipelineMode === 'vlm'
-                        ? 'bg-[#1c1b1d] text-[#e5e1e4] shadow-sm'
-                        : 'text-[#c2c6d6] hover:text-[#e5e1e4]'
-                    }`}
+                    className={`py-1.5 text-xs font-semibold rounded cursor-pointer transition ${pipelineMode === 'vlm'
+                      ? 'bg-[#1c1b1d] text-[#e5e1e4] shadow-sm'
+                      : 'text-[#c2c6d6] hover:text-[#e5e1e4]'
+                      }`}
                   >
                     VLM (Vision-Language)
                   </button>
                   <button
                     type="button"
                     onClick={() => setPipelineMode('ocr')}
-                    className={`py-1.5 text-xs font-semibold rounded cursor-pointer transition ${
-                      pipelineMode === 'ocr'
-                        ? 'bg-[#1c1b1d] text-[#e5e1e4] shadow-sm'
-                        : 'text-[#c2c6d6] hover:text-[#e5e1e4]'
-                    }`}
+                    className={`py-1.5 text-xs font-semibold rounded cursor-pointer transition ${pipelineMode === 'ocr'
+                      ? 'bg-[#1c1b1d] text-[#e5e1e4] shadow-sm'
+                      : 'text-[#c2c6d6] hover:text-[#e5e1e4]'
+                      }`}
                   >
-                    OCR + Whisper
+                    OCR + VLM
                   </button>
                 </div>
                 <span className="text-[9px] text-[#c2c6d6] block mt-1">
@@ -490,22 +533,20 @@ export default function CreateNewDub({ onNavigateToJobs, onJobCreated }: CreateN
                   <button
                     type="button"
                     onClick={() => setVlmMode('local')}
-                    className={`py-1.5 text-xs font-semibold rounded cursor-pointer transition ${
-                      vlmMode === 'local'
-                        ? 'bg-[#1c1b1d] text-[#e5e1e4] shadow-sm'
-                        : 'text-[#c2c6d6] hover:text-[#e5e1e4]'
-                    }`}
+                    className={`py-1.5 text-xs font-semibold rounded cursor-pointer transition ${vlmMode === 'local'
+                      ? 'bg-[#1c1b1d] text-[#e5e1e4] shadow-sm'
+                      : 'text-[#c2c6d6] hover:text-[#e5e1e4]'
+                      }`}
                   >
                     Local Qwen3.5-2B
                   </button>
                   <button
                     type="button"
                     onClick={() => setVlmMode('api')}
-                    className={`py-1.5 text-xs font-semibold rounded cursor-pointer transition ${
-                      vlmMode === 'api'
-                        ? 'bg-[#1c1b1d] text-[#e5e1e4] shadow-sm'
-                        : 'text-[#c2c6d6] hover:text-[#e5e1e4]'
-                    }`}
+                    className={`py-1.5 text-xs font-semibold rounded cursor-pointer transition ${vlmMode === 'api'
+                      ? 'bg-[#1c1b1d] text-[#e5e1e4] shadow-sm'
+                      : 'text-[#c2c6d6] hover:text-[#e5e1e4]'
+                      }`}
                   >
                     Gemini API Key
                   </button>

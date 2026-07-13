@@ -244,6 +244,7 @@ class TTSClient:
         self,
         text: str,
         ref_codes: Optional[Any] = None,
+        voice: Optional[Any] = None,
         ref_text: Optional[str] = None,
         reference_audio: Optional[str | Path] = None,
         # Legacy compat param (not used by vieneu engine)
@@ -274,13 +275,15 @@ class TTSClient:
             logger.warning("Empty text after normalization, returning silence")
             return np.zeros(self.sample_rate, dtype=np.float32)
 
-        # If no ref_codes but a reference_audio path given, encode on the fly
-        if ref_codes is None and reference_audio is not None:
+        # If no ref_codes/voice but a reference_audio path given, encode on the fly
+        if ref_codes is None and voice is None and reference_audio is not None:
             ref_codes = self.encode_reference(reference_audio)
 
         # Build infer kwargs
         infer_kwargs: Dict[str, Any] = {"text": text}
-        if ref_codes is not None:
+        if voice is not None:
+            infer_kwargs["voice"] = voice
+        elif ref_codes is not None:
             infer_kwargs["ref_codes"] = ref_codes
         if ref_text:
             infer_kwargs["ref_text"] = ref_text
@@ -304,6 +307,7 @@ class TTSClient:
         text: str,
         output_path: str | Path,
         ref_codes: Optional[Any] = None,
+        voice: Optional[Any] = None,
         ref_text: Optional[str] = None,
         reference_audio: Optional[str | Path] = None,
         # Legacy compat
@@ -326,6 +330,7 @@ class TTSClient:
         audio = self.synthesize(
             text=text,
             ref_codes=ref_codes,
+            voice=voice,
             ref_text=ref_text,
             reference_audio=reference_audio,
         )

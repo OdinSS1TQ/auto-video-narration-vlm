@@ -163,6 +163,8 @@ async def _run_pipeline(job_id: str, request: ProcessRequest):
         result = await runner.run(
             video_path=request.video_path,
             reference_audio_path=request.audio_path,
+            voice_source=request.voice_source,
+            preset_voice_id=request.preset_voice_id,
         )
 
         with _jobs_lock:
@@ -193,11 +195,22 @@ async def start_processing(request: ProcessRequest):
     if request.pipeline_mode not in ("ocr", "vlm"):
         raise HTTPException(422, f"Invalid pipeline_mode: {request.pipeline_mode}. Must be 'ocr' or 'vlm'.")
 
-    # Validate file existence
+    # Validate voice source
+    if request.voice_source not in ("clone", "preset"):
+        raise HTTPException(422, f"Invalid voice_source: {request.voice_source}. Must be 'clone' or 'preset'.")
+
+    if request.voice_source == "preset":
+        if not request.preset_voice_id:
+            raise HTTPException(422, "preset_voice_id is required when voice_source='preset'.")
+    else:  # clone
+        if not request.audio_path:
+            raise HTTPException(422, "audio_path is required when voice_source='clone'.")
+        if not Path(request.audio_path).exists():
+            raise HTTPException(404, f"Audio file not found: {request.audio_path}")
+
+    # Validate video existence
     if not Path(request.video_path).exists():
         raise HTTPException(404, f"Video file not found: {request.video_path}")
-    if not Path(request.audio_path).exists():
-        raise HTTPException(404, f"Audio file not found: {request.audio_path}")
 
     # Rate limiting
     if _count_active_jobs() >= MAX_CONCURRENT_JOBS:
@@ -236,6 +249,8 @@ async def start_processing(request: ProcessRequest):
             "vlm_mode": request.vlm_mode,
             "keep_original_audio": request.keep_original_audio,
             "tts_engine": request.tts_engine,
+            "voice_source": request.voice_source,
+            "preset_voice_id": request.preset_voice_id,
         }
     save_jobs()
 

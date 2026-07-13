@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.routers import upload, process, status, download
-from app.routers import health, config
+from app.routers import health, config, tts
 
 # Create FastAPI app
 app = FastAPI(
@@ -38,6 +38,7 @@ app.include_router(status.router, prefix="/api", tags=["Status"])
 app.include_router(download.router, prefix="/api", tags=["Download"])
 app.include_router(health.router, prefix="/api", tags=["Health"])
 app.include_router(config.router, prefix="/api", tags=["Config"])
+app.include_router(tts.router, prefix="/api", tags=["TTS"])
 
 # Mount Studio React Frontend
 frontend_dist = Path(__file__).parent.parent / "frontend" / "dist"

@@ -65,11 +65,11 @@ export default function SystemHealth() {
   const isHealthy = health?.status === 'healthy';
   const isDegraded = health?.status === 'degraded';
   const statusLabel = isHealthy ? 'System Healthy' : isDegraded ? 'System Degraded' : 'System Unhealthy';
-  const statusDesc = isHealthy 
+  const statusDesc = isHealthy
     ? 'All core engines are operational and processing jobs efficiently.'
-    : isDegraded 
-    ? 'Some optional dependencies are missing (VRAM/GPU is unavailable). System falls back to API translation.'
-    : 'Required core dependencies (FFmpeg) are missing. Dubbing operations are unavailable.';
+    : isDegraded
+      ? 'Some optional dependencies are missing (VRAM/GPU is unavailable). System falls back to API translation.'
+      : 'Required core dependencies (FFmpeg) are missing. Dubbing operations are unavailable.';
 
   // Storage calculations
   const uploadsSize = health?.disk_usage?.uploads_mb || 0;
@@ -77,7 +77,7 @@ export default function SystemHealth() {
 
   return (
     <div className="flex-1 flex flex-col min-h-screen bg-[#0d0d0f] text-[#e5e1e4] p-8 pb-16">
-      
+
       {/* Page Title & Tab buttons */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
         <div>
@@ -92,21 +92,19 @@ export default function SystemHealth() {
         <div className="flex bg-[#141416] p-1 rounded-md border border-[#1c1b1d]">
           <button
             onClick={() => setActiveTab('metrics')}
-            className={`px-4 py-2 font-mono text-xs font-semibold rounded cursor-pointer transition ${
-              activeTab === 'metrics'
+            className={`px-4 py-2 font-mono text-xs font-semibold rounded cursor-pointer transition ${activeTab === 'metrics'
                 ? 'bg-[#3626ce] text-white shadow-sm'
                 : 'text-[#c2c6d6] hover:text-[#e5e1e4]'
-            }`}
+              }`}
           >
             Health Metrics
           </button>
           <button
             onClick={() => setActiveTab('config')}
-            className={`px-4 py-2 font-mono text-xs font-semibold rounded cursor-pointer transition ${
-              activeTab === 'config'
+            className={`px-4 py-2 font-mono text-xs font-semibold rounded cursor-pointer transition ${activeTab === 'config'
                 ? 'bg-[#3626ce] text-white shadow-sm'
                 : 'text-[#c2c6d6] hover:text-[#e5e1e4]'
-            }`}
+              }`}
           >
             Configuration
           </button>
@@ -128,13 +126,12 @@ export default function SystemHealth() {
           {/* Header overall Card */}
           <div className="bg-[#141416] border border-[#1c1b1d] rounded-lg p-6 flex items-center justify-between gap-6">
             <div className="flex items-center gap-4">
-              <div className={`w-12 h-12 rounded-lg flex items-center justify-center ${
-                isHealthy 
-                  ? 'bg-emerald-500/15 border border-emerald-500/30 text-emerald-400' 
-                  : isDegraded 
-                  ? 'bg-amber-500/15 border border-amber-500/30 text-amber-400' 
-                  : 'bg-red-500/15 border border-red-500/30 text-red-400'
-              }`}>
+              <div className={`w-12 h-12 rounded-lg flex items-center justify-center ${isHealthy
+                  ? 'bg-emerald-500/15 border border-emerald-500/30 text-emerald-400'
+                  : isDegraded
+                    ? 'bg-amber-500/15 border border-amber-500/30 text-amber-400'
+                    : 'bg-red-500/15 border border-red-500/30 text-red-400'
+                }`}>
                 {isHealthy ? (
                   <ShieldCheck className="w-6 h-6" />
                 ) : isDegraded ? (
@@ -156,7 +153,7 @@ export default function SystemHealth() {
 
           {/* Bento Status Grid - 4 Columns */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            
+
             {/* Card A: FFmpeg */}
             <div className="bg-[#141416] border border-[#1c1b1d] rounded-lg p-5 flex flex-col justify-between min-h-[140px]">
               <div className="flex items-center justify-between mb-4">
@@ -216,8 +213,8 @@ export default function SystemHealth() {
                   {health.dependencies.gpu.name ? health.dependencies.gpu.name.substring(0, 22) : 'No GPU Detected'}
                 </span>
                 <span className="text-base font-bold text-[#e5e1e4] block">
-                  {health.dependencies.gpu.available 
-                    ? `${(health.dependencies.gpu.vram_mb / 1024).toFixed(1)} GB VRAM` 
+                  {health.dependencies.gpu.available
+                    ? `${(health.dependencies.gpu.vram_mb / 1024).toFixed(1)} GB VRAM`
                     : 'System Memory fallback'}
                 </span>
               </div>
@@ -241,11 +238,10 @@ export default function SystemHealth() {
                   {Array.from({ length: health.max_concurrent_jobs }).map((_, idx) => (
                     <div
                       key={idx}
-                      className={`h-2 flex-1 rounded-full ${
-                        idx < health.active_jobs
+                      className={`h-2 flex-1 rounded-full ${idx < health.active_jobs
                           ? 'bg-blue-400 animate-pulse'
                           : 'bg-[#1c1b1d] border border-[#424754]/30'
-                      }`}
+                        }`}
                     ></div>
                   ))}
                 </div>

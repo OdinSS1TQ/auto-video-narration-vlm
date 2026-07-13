@@ -69,3 +69,7 @@ models/
 
 
 .claude/
+
+docs/*
+
+data/*

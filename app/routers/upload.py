@@ -1,10 +1,12 @@
 """Upload router — POST /upload/video, /upload/audio"""
 
 import shutil
+import subprocess
 import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, UploadFile, File, HTTPException
+from loguru import logger
 
 from app.schemas.response import UploadResponse
 
@@ -16,6 +18,30 @@ UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 # Size limits (bytes)
 MAX_VIDEO_SIZE = 200 * 1024 * 1024  # 200 MB
 MAX_AUDIO_SIZE = 10 * 1024 * 1024   # 10 MB
+
+
+def _normalize_audio_to_wav(src: Path) -> Path:
+    """Transcode any uploaded audio to clean 24 kHz mono PCM16 WAV.
+
+    VieNeu's encode_reference() calls librosa.load(); feeding it webm/opus or
+    odd containers triggers the PySoundFile->audioread fallback (and has caused
+    '[Errno 13] Permission denied' in the past). A clean PCM WAV avoids that.
+
+    On any ffmpeg failure, logs a warning and returns the original path so the
+    upload still succeeds.
+    """
+    out = src.with_suffix(".norm.wav")
+    cmd = [
+        "ffmpeg", "-y", "-i", str(src),
+        "-ar", "24000", "-ac", "1", "-c:a", "pcm_s16le",
+        str(out),
+    ]
+    try:
+        subprocess.run(cmd, check=True, capture_output=True)
+        return out
+    except Exception as exc:
+        logger.warning(f"Audio normalize failed for {src.name} ({exc}); using original")
+        return src
 
 
 async def _read_upload(file: UploadFile, max_size: int) -> bytes:
@@ -79,9 +105,12 @@ async def upload_audio(file: UploadFile = File(...)):
     with open(save_path, "wb") as f:
         f.write(content)
 
+    # Normalize to clean PCM WAV for stable VieNeu reference loading.
+    normalized = _normalize_audio_to_wav(save_path)
+
     return UploadResponse(
         file_id=file_id,
         filename=file.filename,
-        path=str(save_path),
-        size_mb=save_path.stat().st_size / (1024 * 1024),
+        path=str(normalized),
+        size_mb=normalized.stat().st_size / (1024 * 1024),
     )
