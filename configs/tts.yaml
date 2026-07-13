@@ -1,26 +1,50 @@
-# TTS configuration
+# TTS configuration — VieNeu-TTS v2 Turbo
+# SDK  : pip install vieneu
+# Docs : https://docs.vieneu.io
 
-engine: f5-tts  # f5-tts | vixtts
+# Active engine
+engine: vieneu   # vieneu (recommended) | f5-tts | vixtts
 
-f5_tts:
-  model_path: ./models/vitts/f5-tts-vi
-  sample_rate: 22050
-  speed: 1.0
-  # length_scale: 1.0  # Adjust for speaking speed
+# ── VieNeu-TTS v2 Turbo ─────────────────────────────────────────────────────
+vieneu:
+  # SDK mode: "turbo" (GGUF + ONNX, default, no PyTorch needed)
+  #           "standard" (PyTorch/transformers) | "fast" (LMDeploy GPU) | "remote" (API)
+  mode: turbo
+  # Override backbone repo (null = use SDK default: pnnbao-ump/VieNeu-TTS-v2-Turbo-GGUF)
+  backbone_repo: null
+  backbone_device: cuda
+  # Codec settings (null = use SDK default ONNX codec)
+  codec_repo: null
+  codec_device: cpu
+  # Output sample rate (VieNeu native — do not change)
+  sample_rate: 24000
+  # HuggingFace token (leave empty — model is public)
+  hf_token: ""
+  # Reference transcript (optional — Turbo v2 is truly zero-shot)
+  ref_text: ""
 
-vixtts:
-  model_path: ./models/vitts/vixtts-v2
-  sample_rate: 22050
-  language: vi
+# ── Speaker / Voice Cloning ─────────────────────────────────────────────────
+voice_cloning:
+  # Recommended reference audio duration for best quality
+  ref_audio_min_sec: 3
+  ref_audio_max_sec: 10
+  # Cache ref_codes in-memory during a pipeline run (avoids re-encoding)
+  cache_ref_codes: true
 
-# Speaker encoder
-speaker_encoder:
-  backend: resemblyzer  # resemblyzer | speechbrain
-  cache_dir: ./.speaker_cache
-
-# Audio post-processing
+# ── Audio Post-Processing ───────────────────────────────────────────────────
 post_processing:
   normalize: true
   target_db: -20.0
   remove_silence: false
   silence_threshold_db: -40.0
+
+# ── Legacy (kept for reference, not currently active) ───────────────────────
+f5_tts:
+  model_path: ./models/vitts/f5-tts-vi
+  sample_rate: 22050
+  speed: 1.0
+
+vixtts:
+  model_path: ./models/vitts/vixtts-v2
+  sample_rate: 22050
+  language: vi

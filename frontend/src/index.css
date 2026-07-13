@@ -1,0 +1,45 @@
+@import url('https://fonts.googleapis.com/css2?family=Geist+Mono:wght@100..900&family=Geist:wght@100..900&family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&family=Inter:wght@100..900&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --color-kinetic-bg: #131315;
+  --color-kinetic-surface: #181c26; /* Dark background card with slate-ish vibe */
+  --color-kinetic-border: #424754; /* outline-variant */
+  --color-kinetic-primary: #adc6ff; /* light purple/blue primary */
+  --color-kinetic-accent: #3b82f6; /* Electric blue */
+  --color-kinetic-purple: #3626ce; /* Purple container */
+  --color-kinetic-purple-light: #c3c0ff;
+  --color-on-kinetic: #e5e1e4;
+  --color-on-kinetic-variant: #c2c6d6;
+  
+  --font-geist: "Geist", "Inter", sans-serif;
+  --font-mono: "JetBrains Mono", monospace;
+  
+  --radius-sm: 0.125rem;
+  --radius-md: 0.25rem;
+  --radius-lg: 0.5rem;
+  --radius-xl: 0.75rem;
+}
+
+body {
+  background-color: #0d0d0f;
+  color: #e5e1e4;
+  font-family: "Geist", "Inter", sans-serif;
+  overflow-x: hidden;
+}
+
+/* Custom transitions and scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #0d0d0f;
+}
+::-webkit-scrollbar-thumb {
+  background: #201f22;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #2a2a2c;
+}

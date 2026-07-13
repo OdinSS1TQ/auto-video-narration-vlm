@@ -3,6 +3,7 @@ Auto-download model weights from HuggingFace.
 
 Usage:
     python scripts/download_models.py
+    python scripts/download_models.py --model qwen3.5
     python scripts/download_models.py --model qwen2.5-vl
     python scripts/download_models.py --model glm-ocr
 """
@@ -15,11 +16,23 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 
 MODELS = {
+    "qwen3.5": {
+        "name": "Qwen3.5-2B (Default Local VLM)",
+        "repo_id": "Qwen/Qwen3.5-2B",
+        "output_dir": "models/qwen3.5-2b",
+        "description": "Multimodal model 2B, ~4GB VRAM (default, recommended)",
+    },
+    "qwen3.5-0.8b": {
+        "name": "Qwen3.5-0.8B (Lightweight)",
+        "repo_id": "Qwen/Qwen3.5-0.8B",
+        "output_dir": "models/qwen3.5-0.8b",
+        "description": "Compact 0.8B multimodal model, ~1.6GB VRAM (edge/mobile)",
+    },
     "qwen2.5-vl": {
-        "name": "Qwen2.5-VL-3B-Instruct (Full HuggingFace)",
+        "name": "Qwen2.5-VL-3B-Instruct (Legacy VLM)",
         "repo_id": "Qwen/Qwen2.5-VL-3B-Instruct",
         "output_dir": "models/qwen2.5-vl-3b",
-        "description": "Full Qwen2.5-VL-3B for transformers inference (~6GB VRAM)",
+        "description": "Full Qwen2.5-VL-3B for transformers inference (~6GB VRAM, legacy)",
     },
     "glm-ocr": {
         "name": "GLM-OCR-0.9B",

@@ -30,6 +30,8 @@ class FFmpegRenderer:
                 [self.ffmpeg_path, "-version"],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
             )
             version = result.stdout.split("\n")[0]
             logger.debug(f"FFmpeg available: {version}")
@@ -82,10 +84,17 @@ class FFmpegRenderer:
         if not filter_parts:
             raise ValueError("No valid audio segments to merge")
 
-        # Mix all delayed segments
+        # Mix all delayed segments, then pad to full video duration with silence.
+        # Without apad, the merged track ends at the last segment's end, so the
+        # downstream video render with -shortest truncates the entire video.
         mix_inputs = "".join(f"[a{i}]" for i in range(len(filter_parts)))
         filter_complex = ";".join(filter_parts)
-        filter_complex += f";{mix_inputs}amix=inputs={len(filter_parts)}:duration=longest[out]"
+        # normalize=0 prevents amix from dividing volume by input count —
+        # segments don't overlap so there's no clipping risk.
+        filter_complex += (
+            f";{mix_inputs}amix=inputs={len(filter_parts)}:duration=longest:normalize=0[mixed]"
+            f";[mixed]apad=whole_dur={total_duration}[out]"
+        )
 
         cmd = [
             self.ffmpeg_path, "-y",
@@ -94,11 +103,12 @@ class FFmpegRenderer:
             "-map", "[out]",
             "-ar", str(sample_rate),
             "-ac", "1",
+            "-t", f"{total_duration:.3f}",
             str(output_path),
         ]
 
         logger.debug(f"Merging {len(filter_parts)} audio segments")
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
 
         if result.returncode != 0:
             logger.error(f"FFmpeg merge failed: {result.stderr}")
@@ -159,7 +169,7 @@ class FFmpegRenderer:
             ]
 
         logger.info(f"Rendering final video: {output_path}")
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
 
         if result.returncode != 0:
             logger.error(f"FFmpeg render failed: {result.stderr}")
@@ -199,7 +209,7 @@ class FFmpegRenderer:
             str(output_path),
         ]
 
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
         if result.returncode != 0:
             raise RuntimeError(f"FFmpeg subtitle burn failed: {result.stderr}")
 
@@ -216,7 +226,7 @@ class FFmpegRenderer:
             str(video_path),
         ]
 
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
         if result.returncode != 0:
             raise RuntimeError(f"ffprobe failed: {result.stderr}")
 

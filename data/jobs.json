@@ -1,0 +1,146 @@
+{
+  "9aa946e7-5eac-4aac-a71e-ffb6137917de": {
+    "status": "completed",
+    "progress": {
+      "step": "video_rendering",
+      "step_name_vi": "Render video cuối cùng",
+      "current": 8,
+      "total": 8,
+      "percent": 100
+    },
+    "result": {
+      "video_path": "data\\video\\Demo-Module-5.mp4",
+      "reference_audio": "data\\reference_audio\\speaker.wav",
+      "mode": "ocr",
+      "n_segments_raw": 19,
+      "n_segments_after_classify": 9,
+      "n_segments_merged": 5,
+      "srt_path": "data\\outputs\\Demo-Module-5\\Demo-Module-5_vi.srt",
+      "output_path": "data\\outputs\\Demo-Module-5\\Demo-Module-5_dubbed.mp4",
+      "elapsed_seconds": 69.17528223991394
+    },
+    "error": null,
+    "created_at": "2026-06-05T15:53:47.159478+07:00",
+    "logs": [
+      "[15:53:47] INF: Initializing pipeline for 9aa946e7-5eac-4aac-a71e-ffb6137917de",
+      "[15:53:47] INF: Source Video: data/video/Demo-Module-5.mp4",
+      "[15:53:47] INF: Reference Audio: data/reference_audio/speaker.wav",
+      "[15:53:47] INF: Pipeline Mode: OCR | VLM: LOCAL | TTS: VIENEU",
+      "[15:53:47] INF: Queued in processing pool."
+    ],
+    "video_path": "data/video/Demo-Module-5.mp4",
+    "audio_path": "data/reference_audio/speaker.wav",
+    "pipeline_mode": "ocr",
+    "vlm_mode": "local",
+    "keep_original_audio": false,
+    "tts_engine": "vieneu"
+  },
+  "63934346-9e7d-4519-b0e4-521da7403797": {
+    "status": "completed",
+    "progress": {
+      "step": "video_rendering",
+      "step_name_vi": "Render video cuối cùng",
+      "current": 8,
+      "total": 8,
+      "percent": 100
+    },
+    "result": {
+      "video_path": "data\\video\\Demo-Module-5.mp4",
+      "reference_audio": "data\\reference_audio\\speaker.wav",
+      "mode": "ocr",
+      "n_segments_raw": 19,
+      "n_segments_after_classify": 9,
+      "n_segments_merged": 5,
+      "srt_path": "data\\outputs\\Demo-Module-5\\Demo-Module-5_vi.srt",
+      "output_path": "data\\outputs\\Demo-Module-5\\Demo-Module-5_dubbed.mp4",
+      "elapsed_seconds": 86.56988143920898
+    },
+    "error": null,
+    "created_at": "2026-06-05T15:57:17.538357+07:00",
+    "logs": [
+      "[15:57:17] INF: Initializing pipeline for 63934346-9e7d-4519-b0e4-521da7403797",
+      "[15:57:17] INF: Source Video: data/video/Demo-Module-5.mp4",
+      "[15:57:17] INF: Reference Audio: data/reference_audio/speaker.wav",
+      "[15:57:17] INF: Pipeline Mode: OCR | VLM: LOCAL | TTS: VIENEU",
+      "[15:57:17] INF: Queued in processing pool."
+    ],
+    "video_path": "data/video/Demo-Module-5.mp4",
+    "audio_path": "data/reference_audio/speaker.wav",
+    "pipeline_mode": "ocr",
+    "vlm_mode": "local",
+    "keep_original_audio": false,
+    "tts_engine": "vieneu"
+  },
+  "f782e220-356e-4282-8dcd-ed09e6c20eae": {
+    "status": "completed",
+    "progress": {
+      "step": "video_rendering",
+      "step_name_vi": "Render video cuối cùng",
+      "current": 8,
+      "total": 8,
+      "percent": 100
+    },
+    "result": {
+      "video_path": "data\\video\\Demo-Module-5.mp4",
+      "reference_audio": "data\\reference_audio\\speaker.wav",
+      "mode": "ocr",
+      "n_segments_raw": 19,
+      "n_segments_after_classify": 9,
+      "n_segments_merged": 5,
+      "srt_path": "data\\outputs\\Demo-Module-5\\Demo-Module-5_vi.srt",
+      "output_path": "data\\outputs\\Demo-Module-5\\Demo-Module-5_dubbed.mp4",
+      "elapsed_seconds": 210.46516609191895
+    },
+    "error": null,
+    "created_at": "2026-06-05T16:08:07.356451+07:00",
+    "logs": [
+      "[16:08:07] INF: Initializing pipeline for f782e220-356e-4282-8dcd-ed09e6c20eae",
+      "[16:08:07] INF: Source Video: data/video/Demo-Module-5.mp4",
+      "[16:08:07] INF: Reference Audio: data/reference_audio/speaker.wav",
+      "[16:08:07] INF: Pipeline Mode: OCR | VLM: LOCAL | TTS: VIENEU",
+      "[16:08:07] INF: Queued in processing pool."
+    ],
+    "video_path": "data/video/Demo-Module-5.mp4",
+    "audio_path": "data/reference_audio/speaker.wav",
+    "pipeline_mode": "ocr",
+    "vlm_mode": "local",
+    "keep_original_audio": false,
+    "tts_engine": "vieneu"
+  },
+  "f6ea7fd1-2e03-4bc6-922e-ba7802969655": {
+    "status": "completed",
+    "progress": {
+      "step": "video_rendering",
+      "step_name_vi": "Render video cuối cùng",
+      "current": 8,
+      "total": 8,
+      "percent": 100
+    },
+    "result": {
+      "video_path": "data\\uploads\\82ec65ed-1713-4210-a1f6-87f653d6ade6.mp4",
+      "reference_audio": "data\\reference_audio\\speaker.wav",
+      "mode": "ocr",
+      "n_segments_raw": 13,
+      "n_segments_after_classify": 13,
+      "n_segments_merged": 13,
+      "srt_path": "data\\outputs\\82ec65ed-1713-4210-a1f6-87f653d6ade6\\82ec65ed-1713-4210-a1f6-87f653d6ade6_vi.srt",
+      "output_path": "data\\outputs\\82ec65ed-1713-4210-a1f6-87f653d6ade6\\82ec65ed-1713-4210-a1f6-87f653d6ade6_dubbed.mp4",
+      "elapsed_seconds": 587.0113632678986
+    },
+    "error": null,
+    "created_at": "2026-06-11T09:30:41.942516+07:00",
+    "logs": [
+      "[09:30:41] INF: Initializing pipeline for f6ea7fd1-2e03-4bc6-922e-ba7802969655",
+      "[09:30:41] INF: Source Video: data\\uploads\\82ec65ed-1713-4210-a1f6-87f653d6ade6.mp4",
+      "[09:30:41] INF: Reference Audio: data/reference_audio/speaker.wav",
+      "[09:30:41] INF: Pipeline Mode: OCR | VLM: LOCAL | TTS: VIENEU",
+      "[09:30:41] INF: Queued in processing pool."
+    ],
+    "video_path": "data\\uploads\\82ec65ed-1713-4210-a1f6-87f653d6ade6.mp4",
+    "audio_path": "data/reference_audio/speaker.wav",
+    "pipeline_mode": "ocr",
+    "vlm_mode": "local",
+    "keep_original_audio": false,
+    "tts_engine": "vieneu"
+  }
+}

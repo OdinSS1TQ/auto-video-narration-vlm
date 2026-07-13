@@ -1,9 +1,11 @@
 """
-VLM Client — Gemini / Qwen2.5-VL client for video understanding.
+VLM Client — Multi-backend client for video understanding.
 
 Supports:
-  - API mode: Gemini 1.5 Flash (native video understanding, 1M token context)
-  - Local mode: Qwen2.5-VL-7B-Instruct via Transformers
+  - API mode: Gemini 1.5 Flash / 2.5 Flash (native video understanding, 1M token context)
+  - Local mode:
+      • Qwen3.5-0.8B (default) — compact edge-first multimodal model, ~1.6GB VRAM
+      • Qwen2.5-VL-3B-Instruct (legacy) — dedicated VLM, ~6GB VRAM
 """
 
 import asyncio
@@ -16,8 +18,22 @@ from typing import Any, Dict, List, Optional
 from loguru import logger
 
 
+# ---------------------------------------------------------------------------
+# Helper: detect model family from path/name
+# ---------------------------------------------------------------------------
+
+def _is_qwen25_model(model_path: str) -> bool:
+    """Check if the model path refers to a Qwen2.5-VL model."""
+    lower = model_path.lower().replace("\\", "/")
+    return "qwen2.5" in lower or "qwen2-vl" in lower or "qwen2_5" in lower
+
+
 class VLMClient:
-    """Unified client for Vision Language Model inference."""
+    """Unified client for Vision Language Model inference.
+
+    Supports Gemini API, Qwen3.5-0.8B (default local), and
+    Qwen2.5-VL-3B (legacy local).
+    """
 
     def __init__(
         self,
@@ -31,10 +47,12 @@ class VLMClient:
     ):
         """
         Args:
-            mode: 'api' for Gemini API or 'local' for Qwen2.5-VL.
+            mode: 'api' for Gemini API or 'local' for local VLM.
             model_name: Model identifier.
             api_key: API key for Gemini (required if mode='api').
-            local_model_path: HuggingFace model ID or local path for Qwen2.5-VL.
+            local_model_path: HuggingFace model ID or local path.
+                Default: Qwen/Qwen3.5-0.8B.
+                Legacy: Qwen/Qwen2.5-VL-3B-Instruct or ./models/qwen2.5-vl-3b
             temperature: Sampling temperature.
             max_tokens: Maximum output tokens.
             device: Device for local model ('auto', 'cuda', 'cpu').
@@ -42,12 +60,13 @@ class VLMClient:
         self.mode = mode
         self.model_name = model_name
         self.api_key = api_key
-        self.local_model_path = local_model_path or "Qwen/Qwen2.5-VL-3B-Instruct"
+        self.local_model_path = local_model_path or "Qwen/Qwen3.5-2B"
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.device = device
         self._client = None
         self._processor = None
+        self._is_qwen25 = _is_qwen25_model(self.local_model_path)
 
     # ------------------------------------------------------------------ #
     # Initialization
@@ -64,13 +83,42 @@ class VLMClient:
         logger.info(f"Initialized Gemini API client: {self.model_name}")
 
     def _init_local_client(self):
-        """Initialize local Qwen2.5-VL model via Transformers."""
+        """Initialize local VLM model via Transformers.
+
+        Auto-detects model family:
+          - Qwen3.5-0.8B → AutoModelForImageTextToText (default)
+          - Qwen2.5-VL-3B → Qwen2_5_VLForConditionalGeneration (legacy)
+        """
         if self._client is not None:
             return
 
+        if self._is_qwen25:
+            self._init_qwen25_client()
+        else:
+            self._init_qwen35_client()
+
+    def _init_qwen35_client(self):
+        """Initialize Qwen3.5-0.8B (default) via AutoModelForImageTextToText."""
+        from transformers import AutoModelForImageTextToText, AutoProcessor
+
+        logger.info(f"Loading Qwen3.5 from {self.local_model_path}...")
+
+        self._processor = AutoProcessor.from_pretrained(self.local_model_path)
+
+        self._client = AutoModelForImageTextToText.from_pretrained(
+            self.local_model_path,
+            torch_dtype="auto",
+            device_map=self.device,
+        )
+
+        self._client.eval()
+        logger.info(f"Qwen3.5 loaded on {self._client.device}")
+
+    def _init_qwen25_client(self):
+        """Initialize Qwen2.5-VL-3B (legacy) via Qwen2_5_VLForConditionalGeneration."""
         from transformers import Qwen2_5_VLForConditionalGeneration, AutoProcessor
 
-        logger.info(f"Loading Qwen2.5-VL from {self.local_model_path}...")
+        logger.info(f"Loading Qwen2.5-VL (legacy) from {self.local_model_path}...")
 
         self._processor = AutoProcessor.from_pretrained(self.local_model_path)
 
@@ -146,7 +194,7 @@ class VLMClient:
                 ))
 
         # Add text prompt
-        parts.append(types.Part.from_text(prompt))
+        parts.append(types.Part.from_text(text=prompt))
 
         contents = [types.Content(role="user", parts=parts)]
 
@@ -195,12 +243,98 @@ class VLMClient:
         prompt: str,
         images_base64: Optional[List[str]] = None,
     ) -> str:
-        """Generate using local Qwen2.5-VL model."""
+        """Generate using local VLM model (Qwen3.5 or Qwen2.5-VL)."""
+        self._init_local_client()
+
+        if self._is_qwen25:
+            return await self._generate_qwen25(prompt, images_base64)
+        else:
+            return await self._generate_qwen35(prompt, images_base64)
+
+    async def _generate_qwen35(
+        self,
+        prompt: str,
+        images_base64: Optional[List[str]] = None,
+    ) -> str:
+        """Generate using Qwen3.5-0.8B (default).
+
+        Uses AutoModelForImageTextToText — no qwen_vl_utils needed.
+        """
+        import torch
+        from PIL import Image
+
+        # Build content list for Qwen3.5 message format
+        content = []
+        pil_images = []
+
+        # Add images if provided
+        if images_base64:
+            for img_b64 in images_base64:
+                img_bytes = base64.b64decode(img_b64)
+                pil_image = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+                pil_images.append(pil_image)
+                content.append({
+                    "type": "image",
+                    "image": pil_image,
+                })
+
+        # Add text prompt
+        content.append({"type": "text", "text": prompt})
+
+        messages = [{"role": "user", "content": content}]
+
+        # Apply chat template
+        text = self._processor.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True
+        )
+
+        # Process inputs (Qwen3.5: direct processor, no qwen_vl_utils)
+        inputs = self._processor(
+            text=[text],
+            images=pil_images if pil_images else None,
+            padding=True,
+            return_tensors="pt",
+        ).to(self._client.device)
+
+        # Generate with Qwen3.5 recommended VL params
+        # (from model card: temperature=0.7, top_p=0.80, top_k=20, presence_penalty=1.5)
+        with torch.no_grad():
+            generated_ids = self._client.generate(
+                **inputs,
+                max_new_tokens=self.max_tokens,
+                temperature=self.temperature if self.temperature > 0 else 0.7,
+                top_p=0.8,
+                top_k=20,
+                repetition_penalty=1.1,
+                do_sample=True,
+            )
+
+        # Decode only new tokens
+        generated_ids_trimmed = [
+            out_ids[len(in_ids):]
+            for in_ids, out_ids in zip(inputs.input_ids, generated_ids)
+        ]
+
+        output_text = self._processor.batch_decode(
+            generated_ids_trimmed,
+            skip_special_tokens=True,
+            clean_up_tokenization_spaces=False,
+        )[0]
+
+        return output_text
+
+    async def _generate_qwen25(
+        self,
+        prompt: str,
+        images_base64: Optional[List[str]] = None,
+    ) -> str:
+        """Generate using Qwen2.5-VL-3B (legacy).
+
+        Uses Qwen2_5_VLForConditionalGeneration + qwen_vl_utils.
+        """
         import torch
         from PIL import Image
         from qwen_vl_utils import process_vision_info
-
-        self._init_local_client()
 
         # Build content list for Qwen2.5-VL message format
         content = []
@@ -311,3 +445,13 @@ class VLMClient:
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
             logger.info("Unloaded local VLM model")
+
+    @property
+    def model_family(self) -> str:
+        """Return human-readable model family name."""
+        if self.mode == "api":
+            return f"Gemini ({self.model_name})"
+        elif self._is_qwen25:
+            return f"Qwen2.5-VL (legacy)"
+        else:
+            return f"Qwen3.5 (default)"

@@ -70,13 +70,13 @@ class SyncAccuracy:
 
         for segment in segments:
             audio_path = segment.get("aligned_audio_path")
-            start_sec = segment.get("start_sec", 0)
 
             if not audio_path or not Path(audio_path).exists():
                 continue
 
             try:
-                delay = self.compute_delay(0.0, audio_path)
+                expected = float(segment.get("srt_start_sec", segment.get("start_sec", 0.0)))
+                delay = self.compute_delay(expected, audio_path)
                 delays.append(delay)
             except Exception as e:
                 logger.warning(f"Failed onset detection: {e}")
@@ -96,3 +96,56 @@ class SyncAccuracy:
             f"(n={result['count']})"
         )
         return result
+
+    def evaluate_against_merged_audio(
+        self,
+        srt_entries: List[Dict[str, Any]],
+        merged_audio_path: str | Path,
+        window_sec: float = 1.0,
+    ) -> dict:
+        """For each SRT entry, detect onset within a window around srt_start
+        in the merged audio and report signed delay (positive = audio late)."""
+        import librosa
+
+        y, sr = librosa.load(str(merged_audio_path), sr=None)
+        total_dur = len(y) / sr
+        delays = []
+        missed = 0
+
+        for entry in srt_entries:
+            start = self._timestamp_to_seconds(entry["start_time"])
+            end = self._timestamp_to_seconds(entry["end_time"])
+            win_start = max(0, start - window_sec)
+            win_end = min(total_dur, end + window_sec)
+            seg = y[int(win_start * sr):int(win_end * sr)]
+
+            if len(seg) == 0:
+                missed += 1
+                continue
+
+            onsets = librosa.onset.onset_detect(y=seg, sr=sr, units="time")
+            if len(onsets) == 0:
+                missed += 1
+                continue
+
+            actual = float(onsets[0]) + win_start
+            delays.append(actual - start)
+
+        if not delays:
+            return {"mean_delay": 0.0, "p50": 0.0, "p95": 0.0, "n_missed": missed, "count": 0}
+
+        arr = np.array(delays)
+        return {
+            "mean_delay": float(arr.mean()),
+            "p50": float(np.percentile(np.abs(arr), 50)),
+            "p95": float(np.percentile(np.abs(arr), 95)),
+            "n_missed": missed,
+            "count": len(delays),
+        }
+
+    @staticmethod
+    def _timestamp_to_seconds(ts: str) -> float:
+        parts = ts.replace(",", ".").split(":")
+        h, m = int(parts[0]), int(parts[1])
+        s = float(parts[2])
+        return h * 3600 + m * 60 + s

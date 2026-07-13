@@ -3,6 +3,23 @@ Context Window — Sliding context manager for maintaining coherence across chun
 
 Keeps a sliding window of previous translations to ensure consistency
 in terminology and context across video chunks.
+
+AI Researcher Architecture Note:
+    The ContextWindow implements a 2-layer hierarchical context system:
+
+    Layer 1 (Global): Video-level summary from Pass 0.
+        - Set once before chunk processing begins.
+        - Provides topic, sections, key terms for ALL chunks.
+        - Solves the "chunk isolation" problem where late chunks
+          have no knowledge of the video's opening context.
+
+    Layer 2 (Sliding): Chunk-level sliding window.
+        - Maintains last N chunk results for local continuity.
+        - Extracts terminology mappings for translation consistency.
+        - Limited to window_size=3 by default (sufficient for local context).
+
+    The combination ensures both global coherence and local continuity
+    without exceeding the VLM's context window budget.
 """
 
 from collections import deque
@@ -16,12 +33,15 @@ class ContextWindow:
         """
         Args:
             window_size: Number of previous chunks to keep in context.
+                         3 chunks ≈ 135s of sliding context — enough for
+                         local continuity without overwhelming the prompt.
             max_entries_per_chunk: Max subtitle entries to keep per chunk.
         """
         self.window_size = window_size
         self.max_entries_per_chunk = max_entries_per_chunk
         self._history: deque = deque(maxlen=window_size)
         self._terminology: Dict[str, str] = {}
+        self._global_summary: Optional[str] = None
 
     def add_chunk_result(
         self,
@@ -54,9 +74,39 @@ class ContextWindow:
                 # Track key term mappings (simple extraction)
                 self._terminology[original.lower()] = translated
 
+    # ------------------------------------------------------------------ #
+    # Global Summary (Pass 0 — video-level context)
+    # ------------------------------------------------------------------ #
+
+    def set_global_summary(self, summary: str):
+        """
+        Set the global video summary from Pass 0.
+
+        AI Technical Leader Note:
+            This is called ONCE before per-chunk processing starts.
+            The summary contains: topic, sections outline, key terms.
+            It's injected into every chunk's prompt to provide
+            video-level awareness that the sliding window cannot offer.
+
+        Args:
+            summary: JSON string or text summary from global analysis pass.
+        """
+        self._global_summary = summary
+
+    def get_global_summary(self) -> Optional[str]:
+        """Get the global video summary for prompt injection."""
+        return self._global_summary
+
+    # ------------------------------------------------------------------ #
+    # Sliding Window Context (chunk-level)
+    # ------------------------------------------------------------------ #
+
     def get_context_summary(self) -> str:
         """
         Get a summary of recent context for the next chunk.
+
+        Enhanced: Shows ALL entries from previous chunks so the VLM knows
+        exactly what has already been generated and must NOT repeat.
 
         Returns:
             Formatted context string for prompt injection.
@@ -70,16 +120,18 @@ class ContextWindow:
             summary = chunk_data.get("summary", "")
             entries = chunk_data["entries"]
 
-            part = f"[Chunk {chunk_idx}]"
+            part = f"[Chunk {chunk_idx} — ALREADY GENERATED, DO NOT REPEAT]"
             if summary:
                 part += f" {summary}"
 
-            # Add last few translations
-            for entry in entries[-3:]:
+            # Show ALL entries so VLM can see exactly what was generated
+            for entry in entries:
                 original = entry.get("original_text", "")
                 translated = entry.get("translated_text", "")
+                st = entry.get("start_time", "")
+                et = entry.get("end_time", "")
                 if original and translated:
-                    part += f"\n  '{original}' → '{translated}'"
+                    part += f"\n  [{st}→{et}] '{original}' → '{translated}'"
 
             parts.append(part)
 
@@ -114,6 +166,7 @@ class ContextWindow:
         return dict(self._terminology)
 
     def clear(self):
-        """Reset the context window."""
+        """Reset the context window (both global and sliding)."""
         self._history.clear()
         self._terminology.clear()
+        self._global_summary = None

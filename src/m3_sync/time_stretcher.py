@@ -4,6 +4,7 @@ Time Stretcher — Rubberband wrapper for pitch-preserving time stretching.
 Adjusts audio duration to match subtitle timestamps without changing pitch.
 """
 
+import os
 import subprocess
 import tempfile
 from pathlib import Path
@@ -17,12 +18,15 @@ from loguru import logger
 class TimeStretcher:
     """Time-stretch audio using rubberband for quality pitch preservation."""
 
-    def __init__(self, rubberband_path: str = "rubberband"):
+    def __init__(self, rubberband_path: Optional[str] = None):
         """
         Args:
-            rubberband_path: Path to rubberband CLI binary.
+            rubberband_path: Path to rubberband CLI binary. If None, reads
+                env var RUBBERBAND_PATH, falling back to "rubberband" on PATH.
         """
-        self.rubberband_path = rubberband_path
+        self.rubberband_path = (
+            rubberband_path or os.getenv("RUBBERBAND_PATH") or "rubberband"
+        )
         self._check_rubberband()
 
     def _check_rubberband(self):
@@ -32,6 +36,8 @@ class TimeStretcher:
                 [self.rubberband_path, "--version"],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
             )
             logger.debug(f"Rubberband available: {result.stdout.strip()}")
         except FileNotFoundError:
@@ -93,7 +99,7 @@ class TimeStretcher:
             f"(ratio={ratio:.3f})"
         )
 
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
         if result.returncode != 0:
             raise RuntimeError(f"Rubberband failed: {result.stderr}")
 
@@ -104,6 +110,7 @@ class TimeStretcher:
         audio_path: str | Path,
         target_duration: float,
         tolerance: float = 0.1,
+        output_dir: Optional[str | Path] = None,
     ) -> tuple[Path, str]:
         """
         Stretch audio to fit a target duration, choosing the best strategy.
@@ -112,6 +119,9 @@ class TimeStretcher:
             audio_path: Input audio file path.
             target_duration: Target duration in seconds.
             tolerance: Acceptable duration difference in seconds.
+            output_dir: Directory for stretched output. Defaults to input file's
+                parent (legacy behavior). Pass an explicit dir to keep input dir
+                clean.
 
         Returns:
             Tuple of (output_path, strategy_used).
@@ -124,11 +134,14 @@ class TimeStretcher:
         if abs(delta) <= tolerance:
             return Path(audio_path), "exact"
 
-        # Create temp output
         suffix = Path(audio_path).suffix
-        output_path = Path(audio_path).with_name(
-            f"{Path(audio_path).stem}_stretched{suffix}"
-        )
+        stem = Path(audio_path).stem
+        if output_dir is not None:
+            output_dir = Path(output_dir)
+            output_dir.mkdir(parents=True, exist_ok=True)
+            output_path = output_dir / f"{stem}_stretched{suffix}"
+        else:
+            output_path = Path(audio_path).with_name(f"{stem}_stretched{suffix}")
 
         if 0.5 <= target_duration / current_duration <= 2.0:
             # Within acceptable stretch range
@@ -142,6 +155,58 @@ class TimeStretcher:
             # Need truncation
             self._truncate_audio(audio_path, output_path, target_duration)
             return output_path, "truncate"
+
+    def stretch_capped(
+        self,
+        audio_path: str | Path,
+        target_duration: float,
+        max_ratio: float,
+        output_dir: str | Path,
+        tol: float = 0.2,
+    ) -> tuple[Path, float, str]:
+        """
+        Stretch toward `target_duration` but never compress more than `max_ratio`
+        (audio_dur / achieved_dur). Pitch is preserved (rubberband).
+
+        Returns:
+            (output_path, achieved_duration, strategy)
+              strategy ∈ {"exact", "compress_fit", "compress_max"}
+
+            - "exact": |audio - target| <= tol; no stretch performed.
+            - "compress_fit": audio > target but within budget; achieved = target.
+            - "compress_max": audio > target * max_ratio; achieved = audio /
+                max_ratio. Caller is responsible for absorbing the residual
+                overflow (achieved - target) downstream (slip cascade).
+
+        This helper does NOT pad or truncate. Use existing `stretch_to_fit` for
+        the pad/truncate paths when audio is shorter than target.
+        """
+        audio_path = Path(audio_path)
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        info = sf.info(str(audio_path))
+        current = info.duration
+        delta = current - target_duration
+
+        if abs(delta) <= tol or current <= target_duration:
+            # Within tolerance OR audio already shorter than target — leave
+            # alone; the audio fits without compression.
+            return audio_path, current, "exact"
+
+        ratio_needed = current / target_duration  # > 1 since current > target
+        if ratio_needed <= max_ratio:
+            achieved = target_duration
+            strategy = "compress_fit"
+        else:
+            achieved = current / max_ratio
+            strategy = "compress_max"
+
+        suffix = audio_path.suffix
+        stem = audio_path.stem
+        out_path = output_dir / f"{stem}_stretched{suffix}"
+        self.stretch(audio_path, out_path, achieved)
+        return out_path, achieved, strategy
 
     def _pad_audio(
         self,
