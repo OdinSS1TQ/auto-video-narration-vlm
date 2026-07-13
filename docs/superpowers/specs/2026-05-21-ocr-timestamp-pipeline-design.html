@@ -1,0 +1,363 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>OCR-Driven Timestamp Pipeline — Design Spec</title>
+<style>
+  :root {
+    --fg: #1f2328;
+    --muted: #59636e;
+    --accent: #0969da;
+    --code-bg: #f6f8fa;
+    --border: #d0d7de;
+    --warn: #bf8700;
+  }
+  html { color-scheme: light; }
+  body {
+    font-family: -apple-system, "Segoe UI", system-ui, sans-serif;
+    color: var(--fg);
+    max-width: 920px;
+    margin: 2.5rem auto;
+    padding: 0 1.5rem 4rem;
+    line-height: 1.55;
+    background: #fff;
+  }
+  h1, h2, h3 {
+    line-height: 1.2;
+    font-weight: 600;
+  }
+  h1 { border-bottom: 1px solid var(--border); padding-bottom: .3em; }
+  h2 { margin-top: 2.2em; border-bottom: 1px solid var(--border); padding-bottom: .2em; }
+  h3 { margin-top: 1.8em; }
+  code, pre {
+    font-family: SFMono-Regular, Consolas, "Liberation Mono", monospace;
+    font-size: 0.92em;
+  }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px 14px;
+    overflow-x: auto;
+  }
+  code:not(pre code) {
+    background: var(--code-bg);
+    padding: .15em .35em;
+    border-radius: 4px;
+  }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 1em 0;
+  }
+  th, td {
+    border: 1px solid var(--border);
+    padding: 8px 12px;
+    text-align: left;
+    vertical-align: top;
+  }
+  th { background: var(--code-bg); }
+  blockquote {
+    color: var(--muted);
+    border-left: 4px solid var(--border);
+    padding: .2em 1em;
+    margin: 1em 0;
+  }
+  .meta { color: var(--muted); font-size: 0.95em; }
+  .meta strong { color: var(--fg); }
+  hr { border: 0; border-top: 1px solid var(--border); margin: 2em 0; }
+  ul, ol { padding-left: 1.4em; }
+  .tag {
+    display: inline-block;
+    background: #ddf4ff;
+    color: var(--accent);
+    padding: .1em .55em;
+    border-radius: 999px;
+    font-size: .8em;
+    font-weight: 600;
+    margin-left: .5em;
+    vertical-align: middle;
+  }
+  .tag.warn { background: #fff8c5; color: var(--warn); }
+  .legend { font-size: .85em; color: var(--muted); }
+</style>
+</head>
+<body>
+
+<h1>OCR-Driven Timestamp Pipeline — Design Spec</h1>
+
+<p class="meta">
+<strong>Status:</strong> Draft for approval &nbsp;|&nbsp;
+<strong>Date:</strong> 2026-05-21 &nbsp;|&nbsp;
+<strong>Author:</strong> Quân (with Claude)<br>
+<strong>Related code:</strong>
+<code>src/m1_vlm/glm_ocr.py</code>,
+<code>src/m4_pipeline/runner.py</code>,
+<code>scripts/run_pipeline.py</code>
+</p>
+
+<hr>
+
+<h2>1. Problem Statement</h2>
+<p>The current pipeline relies on the <strong>VLM</strong> to assign timestamps to translated narration. The VLM does three things per chunk:</p>
+<ol>
+  <li><em>Pass 0 — global summary</em> (topic, style, key terms across the full video)</li>
+  <li><em>Per-chunk</em> — extract English narration from frames</li>
+  <li><em>Per-chunk</em> — translate to Vietnamese <strong>and</strong> invent timestamps</li>
+</ol>
+<p>Step 3 is fragile. Frame timestamps are passed in as "anchor points," but the VLM still hallucinates timing, and <code>EntryRetimer</code> post-processes its output with a chars-per-second heuristic. This is the root of most observed SRT drift.</p>
+<p><strong>Observation:</strong> the source tutorial videos already carry <strong>burned-in English captions in the bottom bar</strong>. Those captions are ground truth for both <em>what was said</em> and <em>exactly when</em>. If we read them with OCR, we get accurate timing for free.</p>
+
+<h2>2. Goals &amp; Non-Goals</h2>
+<h3>Goals</h3>
+<ul>
+  <li>Read burned-in English captions with <strong>GLM-OCR</strong> to recover exact <code>(start, end, text)</code> for each subtitle.</li>
+  <li>Use VLM <strong>only for translation</strong>, with the corresponding mid-segment frame attached so it can disambiguate UI/code references.</li>
+  <li>Ship the new path as a <code>--mode ocr</code> option on the existing <code>PipelineRunner</code>. <strong><code>--mode vlm</code> (default) must remain byte-identical to today's behavior.</strong></li>
+  <li>Reuse M2 (TTS), M3 (sync/render) unchanged.</li>
+</ul>
+<h3>Non-Goals</h3>
+<ul>
+  <li>No change to the VLM pipeline behavior at default settings.</li>
+  <li>No automatic caption-band detection in this iteration — fixed bottom-crop ratio is enough.</li>
+  <li>No multi-line subtitle layout heuristics — emit one SRT entry per detected caption segment.</li>
+  <li>No audio ASR fallback — if no captions are detected, we fail loud, not silently fall back to VLM.</li>
+</ul>
+
+<h2>3. High-Level Architecture</h2>
+<h3>Mode <code>vlm</code> <span class="tag">unchanged</span></h3>
+<pre>scene_detection → frame_extraction → ocr_extraction(noop)
+  → vlm_translation (3 tasks: summary + extract + translate+timestamp)
+  → srt_generation → voice_cloning → audio_alignment → video_rendering</pre>
+
+<h3>Mode <code>ocr</code> <span class="tag">new</span></h3>
+<pre>scene_detection                        ← reused
+  → dense_frame_sampling (2 fps, full video)
+  → caption_crop (bottom band)
+  → glm_ocr_per_frame                  ← GLMOCR
+  → caption_segmentation               ← group consecutive frames w/ same text
+  → vlm_translation_per_segment        ← VLM gets {en_text + mid-frame image}
+  → srt_generation                     ← exact OCR timestamps
+  → voice_cloning                      ← reused (M2)
+  → audio_alignment                    ← reused (M3)
+  → video_rendering                    ← reused (M3)</pre>
+<p class="legend">Step labels are added to <code>PipelineRunner.STEPS_OCR</code> so progress callbacks still work.</p>
+
+<h2>4. Components</h2>
+
+<h3>4.1 <code>src/m1_vlm/caption_ocr.py</code> — <code>CaptionTimeline</code> <span class="tag">new</span></h3>
+<pre>@dataclass
+class CaptionSegment:
+    start_sec: float      # exact, from first frame where caption appeared
+    end_sec: float        # exact, from last frame before caption changed
+    en_text: str          # OCR text (normalized)
+    mid_frame: np.ndarray # frame nearest (start+end)/2, for VLM context
+
+class CaptionTimeline:
+    def __init__(
+        self,
+        ocr: GLMOCR,
+        sample_fps: float = 2.0,
+        caption_band_ratio: float = 0.22,   # crop bottom 22%
+        dedup_ratio: float = 0.85,          # Levenshtein ratio threshold
+        min_duration_sec: float = 0.3,      # drop blips shorter than this
+        ocr_prompt: str = "Read the subtitle text only. Return only the text.",
+    ): ...
+
+    def build(self, video_path: Path) -> list[CaptionSegment]:
+        """Sample → OCR → segment. Returns ordered list spanning the video."""</pre>
+
+<p><strong>Algorithm (build):</strong></p>
+<ol>
+  <li>Open video, read FPS + duration with OpenCV.</li>
+  <li>Compute target timestamps: <code>t = 0, 1/fps, 2/fps, ... &lt; duration</code>.</li>
+  <li>For each timestamp: seek, grab frame, crop bottom <code>caption_band_ratio</code> of frame height.</li>
+  <li>Run <code>GLMOCR.extract_text</code> on each crop. Normalize: lowercase, collapse whitespace, strip edge punctuation.</li>
+  <li>Walk the <code>(timestamp, normalized_text)</code> stream. Group consecutive samples where <code>SequenceMatcher.ratio(prev, curr) &gt;= dedup_ratio</code> AND both are non-empty.</li>
+  <li>A group becomes a <code>CaptionSegment</code>:
+    <ul>
+      <li><code>start_sec</code> = first timestamp of group</li>
+      <li><code>end_sec</code> = next-group's first timestamp (or video end)</li>
+      <li><code>en_text</code> = OCR text of the <strong>middle</strong> sample of the group (median == most stable)</li>
+      <li><code>mid_frame</code> = stored separately (extracted lazily later to save RAM)</li>
+    </ul>
+  </li>
+  <li>Drop segments whose duration &lt; <code>min_duration_sec</code>.</li>
+  <li>Return list.</li>
+</ol>
+<p class="legend">RAM note: Frames are released after OCR; we only persist the chosen <code>mid_frame</code> per segment.</p>
+
+<h3>4.2 <code>src/m1_vlm/prompt_chain.py</code> — new method</h3>
+<pre>def build_translation_only_prompt(
+    self,
+    en_text: str,
+    chunk_info: str | None = None,
+    global_context: str | None = None,
+    previous_translations: str | None = None,
+) -&gt; str:
+    """Translate one EN caption to natural VI voiceover.
+    Prompt assumes one frame image will be attached as visual grounding."""</pre>
+<p>Output schema: <code>{"translated_text": "..."}</code> — small, easy to parse, no timing field.</p>
+
+<h3>4.3 <code>src/m4_pipeline/runner.py</code> — branch on mode</h3>
+<ul>
+  <li>Add <code>STEPS_OCR</code> list (parallel to <code>STEPS</code>) so progress reporting stays correct.</li>
+  <li>In <code>run()</code>, after loading config, branch:
+    <pre>if self.config.pipeline_mode == "ocr":
+    await self._run_ocr_mode(...)
+else:
+    await self._run_vlm_mode(...)   # current run() body, factored out unchanged</pre>
+  </li>
+  <li><code>_run_vlm_mode</code> is the <strong>verbatim</strong> current body (extracted, not modified). <code>_run_ocr_mode</code> is new.</li>
+</ul>
+
+<p><strong><code>_run_ocr_mode</code> outline:</strong></p>
+<pre>1. Scene detection                       (reused)
+2. CaptionTimeline.build → segments      (NEW)
+3. Optional Pass 0 global summary        (reused PromptChain.build_global_summary_prompt)
+   - sampled from a handful of segments' mid_frames
+4. For each segment:
+     prompt = build_translation_only_prompt(seg.en_text, global_context=...)
+     vi = await vlm.generate(prompt, images_base64=[encode(seg.mid_frame)])
+     parse JSON → vi_text
+     entries.append({start_time, end_time, original_text: seg.en_text, translated_text: vi_text})
+5. SRTBuilder.add_entries (chunk_offset=0)  → save SRT
+6. Free VLM, run TTS / sync / render        (reused as-is)</pre>
+
+<h3>4.4 <code>src/m4_pipeline/config.py</code> — new properties</h3>
+<pre>@property
+def pipeline_mode(self) -&gt; str:
+    return os.getenv("PIPELINE_MODE", "vlm")   # "vlm" | "ocr"
+
+@property
+def ocr_sample_fps(self) -&gt; float:
+    return float(os.getenv("OCR_SAMPLE_FPS", "2.0"))
+
+@property
+def caption_band_ratio(self) -&gt; float:
+    return float(os.getenv("CAPTION_BAND_RATIO", "0.22"))
+
+@property
+def caption_dedup_ratio(self) -&gt; float:
+    return float(os.getenv("CAPTION_DEDUP_RATIO", "0.85"))
+
+@property
+def caption_min_duration_sec(self) -&gt; float:
+    return float(os.getenv("CAPTION_MIN_DURATION_SEC", "0.3"))</pre>
+
+<h3>4.5 <code>scripts/run_pipeline.py</code> — new flag</h3>
+<pre>--mode {vlm,ocr}   (default: vlm)</pre>
+<p>Flag overrides env var if both set. Default = <code>vlm</code> preserves all existing invocations.</p>
+
+<h3>4.6 <code>.env.example</code></h3>
+<p>Document the new vars listed in §8.</p>
+
+<h2>5. Data Flow</h2>
+<pre>video.mp4
+   │
+   ├─► SceneDetector → chunks (unused in OCR mode for timing, kept for progress UX)
+   │
+   ├─► CaptionTimeline
+   │       │
+   │       ├─ sample @ 2 fps   ─► [(t0, frame0), (t1, frame1), ...]
+   │       ├─ crop bottom 22%  ─► [(t0, crop0), ...]
+   │       ├─ GLM-OCR          ─► [(t0, "hello world"), (t1, "hello world"), ...]
+   │       └─ segment+dedup    ─► [CaptionSegment(0.0, 2.5, "hello world", frame@1.25), ...]
+   │
+   ├─► VLM Pass 0 (optional)   ─► global summary str
+   │
+   ├─► For each segment:
+   │     VLM.translate(en_text + mid_frame, global_ctx) ─► vi_text
+   │
+   ├─► SRTBuilder ─► video_vi.srt
+   │
+   └─► TTS ─► AudioAligner ─► FFmpegRenderer ─► video_dubbed.mp4</pre>
+
+<h2>6. Error Handling</h2>
+<table>
+<tr><th>Failure</th><th>Behavior</th></tr>
+<tr><td>Video unreadable / no frames</td><td><code>PipelineError("Video has no decodable frames")</code> — fail fast.</td></tr>
+<tr><td>GLM-OCR import / load failure</td><td><code>PipelineError</code> with hint to set <code>GLM_OCR_MODEL_PATH</code> or install transformers. No fallback.</td></tr>
+<tr><td>OCR returns empty for <strong>all</strong> samples</td><td><code>PipelineError("No captions detected — video may not have burned-in subtitles; use --mode vlm instead")</code>.</td></tr>
+<tr><td>Single OCR call fails</td><td>Logged as warning; that sample treated as empty string; segmentation continues.</td></tr>
+<tr><td>Segment text contains only punctuation/numbers after normalization</td><td>Dropped before VLM translation.</td></tr>
+<tr><td>VLM translation returns malformed JSON</td><td>Per-segment raw response dumped to <code>work/segments_raw/seg_NN.txt</code>; that segment skipped (logged); pipeline continues.</td></tr>
+<tr><td>Less than 3 valid translated segments</td><td><code>PipelineError("Too few segments translated; aborting before TTS")</code> to avoid wasting compute.</td></tr>
+</table>
+<p class="legend">All errors that abort the pipeline are subclasses of <code>PipelineError</code> so existing UI/CLI handling works.</p>
+
+<h2>7. Testing Strategy</h2>
+<p>Tests live under <code>tests/m1_vlm/</code> and <code>tests/m4_pipeline/</code>. Real fixtures where cheap, mocks for GLM-OCR / VLM.</p>
+
+<h3>Unit (fast, no models)</h3>
+<ul>
+  <li><code>tests/m1_vlm/test_caption_timeline.py</code>
+    <ul>
+      <li><code>test_sampling_timestamps_respect_fps</code> — synthetic 10s video, fps=2 → expect 20 samples.</li>
+      <li><code>test_caption_band_crop_geometry</code> — known-size frame, assert crop shape == <code>(H*ratio, W, 3)</code>.</li>
+      <li><code>test_segmentation_groups_identical_text</code> — mock OCR returns <code>["A","A","A","B","B"]</code> → 2 segments.</li>
+      <li><code>test_segmentation_dedup_ratio_handles_jitter</code> — <code>["hello world","hello wrld","hello world"]</code> → 1 segment when ratio=0.85.</li>
+      <li><code>test_segments_below_min_duration_dropped</code> — flicker blip filtered.</li>
+      <li><code>test_empty_ocr_throughout_returns_empty_list</code> — runner can then raise.</li>
+    </ul>
+  </li>
+  <li><code>tests/m1_vlm/test_translation_only_prompt.py</code>
+    <ul>
+      <li>Snapshot test: prompt contains EN text, mentions Vietnamese, asks for <code>{"translated_text": ...}</code>.</li>
+    </ul>
+  </li>
+</ul>
+
+<h3>Integration (cheap, real OpenCV / mocked models)</h3>
+<ul>
+  <li><code>tests/m4_pipeline/test_runner_mode_branch.py</code>
+    <ul>
+      <li>With <code>pipeline_mode="vlm"</code>, monkeypatch <code>_run_vlm_mode</code> to assert it's called.</li>
+      <li>With <code>pipeline_mode="ocr"</code>, monkeypatch <code>_run_ocr_mode</code> similarly.</li>
+      <li>Confirms zero behavior change for default mode.</li>
+    </ul>
+  </li>
+</ul>
+
+<h3>Manual / smoke</h3>
+<ul>
+  <li><code>scripts/test_caption_ocr.py</code> (new) — point at a known video with burned-in captions, dump segments to stdout, write <code>captions.srt</code> for eyeball check. Run inside venv per project convention.</li>
+</ul>
+
+<h2>8. Config Reference</h2>
+<table>
+<tr><th>Env var</th><th>Default</th><th>Meaning</th></tr>
+<tr><td><code>PIPELINE_MODE</code></td><td><code>vlm</code></td><td><code>vlm</code> (today) or <code>ocr</code> (new).</td></tr>
+<tr><td><code>OCR_SAMPLE_FPS</code></td><td><code>2.0</code></td><td>Caption sampling rate.</td></tr>
+<tr><td><code>CAPTION_BAND_RATIO</code></td><td><code>0.22</code></td><td>Fraction of frame height (from bottom) sent to OCR.</td></tr>
+<tr><td><code>CAPTION_DEDUP_RATIO</code></td><td><code>0.85</code></td><td>SequenceMatcher threshold for "same caption."</td></tr>
+<tr><td><code>CAPTION_MIN_DURATION_SEC</code></td><td><code>0.3</code></td><td>Drop caption segments shorter than this.</td></tr>
+<tr><td><code>GLM_OCR_MODEL_PATH</code></td><td>(existing)</td><td>HF repo id or local path; reused as-is.</td></tr>
+</table>
+<p>CLI: <code>--mode {vlm,ocr}</code> on <code>scripts/run_pipeline.py</code>. Overrides <code>PIPELINE_MODE</code> when present.</p>
+
+<h2>9. Open Decisions Locked In</h2>
+<ul>
+  <li><strong>VLM role:</strong> translator + frame-aware (gets mid-frame per segment). ✔</li>
+  <li><strong>Sampling:</strong> fixed 2 fps. ✔</li>
+  <li><strong>Caption region:</strong> fixed bottom crop, configurable ratio. ✔</li>
+  <li><strong>Packaging:</strong> mode flag on existing runner; <code>vlm</code> default unchanged. ✔</li>
+</ul>
+
+<h2>10. Risks</h2>
+<ol>
+  <li><strong>Captions may not always cover the entire spoken narration</strong> (e.g., intros without subtitles). Acceptable for v1 — segments only exist where captions exist; remainder of audio is silence. Document this.</li>
+  <li><strong>OCR latency</strong> at 2 fps over a 10-minute video = ~1200 GLM-OCR calls. Need to confirm acceptable wall-clock on the user's hardware. If too slow, the adaptive sampling option (proposed earlier, declined) is the natural follow-up.</li>
+  <li><strong>Mid-frame for VLM translation</strong> doubles the per-segment payload vs. text-only translation. Mitigation: VLM is called per segment, not per chunk; payload is one image, not eight.</li>
+</ol>
+
+<h2>11. Out of Scope (deferred)</h2>
+<ul>
+  <li>Auto-detect caption band by clustering OCR bounding-box Y-positions.</li>
+  <li>ASR fallback when no captions exist.</li>
+  <li>Multi-language captions other than English source.</li>
+  <li>Sub-segment splitting (a single very long caption stays as one SRT entry).</li>
+</ul>
+
+</body>
+</html>

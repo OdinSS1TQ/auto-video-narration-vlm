@@ -93,6 +93,7 @@ class BatchInference:
         output_dir: str | Path,
         # VieNeu voice cloning params
         ref_codes: Optional[Any] = None,
+        voice: Optional[Any] = None,
         ref_text: Optional[str] = None,
         reference_audio: Optional[str | Path] = None,
         # Legacy compat (not used by VieNeu engine)
@@ -158,6 +159,7 @@ class BatchInference:
                     text=text,
                     output_path=output_path,
                     ref_codes=ref_codes,
+                    voice=voice,
                     ref_text=ref_text,
                 )
                 result = segment.copy()
